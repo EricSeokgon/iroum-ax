@@ -293,7 +293,71 @@ GREEN phase 통과 기준:
 
 ---
 
-## 다음 단계: Sprint 4 GREEN Phase
+---
+
+## Sprint 5: REQ-AX-004 — RED Phase COMPLETE
+
+- 진입일: 2026-05-14
+- 단계: RED (실패 테스트 작성 완료)
+
+### RED Phase 결과
+
+| 지표 | 값 |
+|------|---|
+| 수집된 테스트 수 | 38 (5파일, integration 제외) |
+| 실패 테스트 수 | 38 |
+| 통과 테스트 수 | 0 |
+| 실패 원인 | NotImplementedError (구현 모듈 스텁만 존재) |
+| Sprint 1+2+3+4 회귀 | 없음 (118/118 통과 유지) |
+| Coverage | 0% (구현 없음, 예상됨) |
+| RED 상태 확인 | YES |
+
+### 생성된 파일
+
+| 파일 | 내용 | 테스트 수 |
+|------|------|----------|
+| `.moai/sprints/SPEC-AX-001/sprint-REQ-AX-004.md` | Sprint Contract (Originality + Functionality) | — |
+| `tests/unit/test_req_ax_004_prompt_builder.py` | PB-1~PB-5: PromptBuilder 계약 | 7 |
+| `tests/unit/test_req_ax_004_style_applier.py` | SA-1~SA-8: 합니다체 검증 | 15 |
+| `tests/unit/test_req_ax_004_llm_client_generate.py` | LC-1~LC-7 + fallback: generate() 계약 | 9 (1 @gpu 제외) |
+| `tests/unit/test_req_ax_004_report_drafter.py` | RD-1~RD-5: 오케스트레이터 계약 | 7 |
+| `tests/unit/test_req_ax_004_integration.py` | INT-1~INT-3: E2E 파이프라인 (@integration) | (3, @integration 제외) |
+| `pkg/models/report.py` (수정) | GenerationResult, StyleReport, DraftSection 모델 추가 | — |
+| `pipelines/generation/prompt_builder.py` | PromptBuilder 스텁 | — |
+| `pipelines/generation/style_applier.py` | StyleApplier 스텁 | — |
+| `pipelines/generation/report_drafter.py` | ReportDrafter 스텁 | — |
+
+### pytest 출력 요약
+
+```
+============ 38 failed, 118 passed, 8 deselected, 1 warning in 2.47s ============
+```
+
+- Sprint 5 테스트 38개: 전부 FAILED (RED 상태 확인)
+- Sprint 1+2+3+4 테스트 118개: 전부 PASSED (회귀 없음)
+- @integration/@gpu 테스트 8개: deselected (별도 마크)
+
+### Sprint 5 AC 상태
+
+| AC | 설명 | 상태 |
+|----|------|------|
+| AC-004-1 | 합니다체 초안 생성 + style_applier 통과 | RED |
+| AC-004-2 | 스타일 위반 → 최대 2 재시도 → style_violation | RED |
+| AC-004-3 | Qwen 2.5 fallback + model_used 메타데이터 추적 | RED |
+
+- 누적 AC 완료: 0 / 24
+- 직전 대비 신규 AC 통과: 0 (RED phase — 예상됨)
+- LSP error delta: +0 (테스트/스텁 파일만 추가, 구현 없음)
+- Coverage delta: 0% → 0% (구현 없음)
+
+### Re-planning Gate 체크
+
+- 연속 zero AC 카운터: 5 (RED phase 다섯 번째 entry — 정상, RED phase는 zero AC가 정상)
+- Stagnation: NO (RED phase 완료, GREEN 진입 예정)
+
+---
+
+## 다음 단계: Sprint 5 GREEN Phase
 
 GREEN phase에서 구현할 모듈 (Sprint 4 신규):
 1. `pipelines/scoring/benchmark_learner.py` — `BenchmarkLearner` 클래스 (TF-IDF + scikit-learn LogisticRegression, state machine: idle→training→ready)
