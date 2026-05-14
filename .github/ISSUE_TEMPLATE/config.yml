@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: SPEC 제안 (Discussion)
+    url: https://github.com/EricSeokgon/iroum-ax/discussions
+    about: 새 기능이나 SPEC 후보는 Discussions에서 먼저 논의 후 SPEC 작성 단계로 전환합니다.
+  - name: 보안 취약점 비공개 보고
+    url: https://github.com/EricSeokgon/iroum-ax/security/advisories/new
+    about: 보안 취약점은 공개 issue 대신 GitHub Security Advisories로 비공개 보고해주세요.
