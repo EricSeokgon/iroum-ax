@@ -127,12 +127,53 @@
 
 ---
 
+## Sprint 4: REQ-CTRL-002 gRPC Server
+
+| 날짜 | 단계 | AC 완료 | 에러 Delta | 상태 |
+|------|------|---------|-----------|------|
+| 2026-05-14 | RED | 0/9 (Must Pass 기준) | +0 | COMPLETE |
+
+**Sprint 4 RED 산출물**:
+- `.moai/sprints/SPEC-AX-CTRL-001/sprint-REQ-CTRL-002.md` — Sprint Contract (Functionality 우선)
+- `apps/control-plane/internal/proto/workflow.pb.go` — hand-written 프로토 메시지 타입 (WorkflowStatus enum, Workflow/Create/Get/List Request/Response)
+- `apps/control-plane/internal/proto/workflow_grpc.pb.go` — hand-written gRPC 서비스 스텁 (WorkflowServiceServer 인터페이스, UnimplementedWorkflowServiceServer, RegisterWorkflowServiceServer, ServiceDesc, 핸들러 어댑터)
+- `apps/control-plane/internal/server/grpc_server.go` — WorkflowService 구현체 (모든 메서드 codes.Unimplemented 반환)
+- `apps/control-plane/internal/server/grpc_server_test.go` — 12개 테스트 (8 FAIL RED, 4 PASS)
+
+**Sprint 4 목표 AC** (9개 Must Pass):
+- [ ] AC-CTRL-002-1: CreateWorkflow → PENDING 상태 + audit 1건 + UUID 반환
+- [ ] AC-CTRL-002-1 atomicity: audit INSERT 실패 시 rollback
+- [ ] AC-CTRL-002-1 concurrent: 3 goroutine 동시 호출 모두 성공 + ID 고유
+- [ ] AC-CTRL-002-2: GetWorkflow → 존재하는 ID 정상 반환
+- [ ] AC-CTRL-002-2: GetWorkflow → 없는 ID codes.NotFound
+- [ ] AC-CTRL-002-3: ListWorkflows 빈 목록 반환
+- [ ] AC-CTRL-002-3: ListWorkflows N개 반환
+- [ ] AC-CTRL-002-3: Limit 강제 (limit=2)
+- [ ] AC-CTRL-002-3: context 취소 → codes.Canceled/DeadlineExceeded
+- (Optional) AC-CTRL-002-4: Prometheus RPCCallCounter 메트릭
+
+**실제 테스트 수**: 12개 신규 (grpc_server_test.go)
+- 8 FAIL (정상 RED 상태): CreateWorkflow_HappyPath, GetWorkflow_Found, GetWorkflow_NotFound_ReturnsNotFoundStatus, ListWorkflows_EmptyStore, ListWorkflows_WithMultiple, ListWorkflows_LimitEnforcement, CreateWorkflow_ContextCancelled_ReturnsCanceledStatus, CreateWorkflow_ConcurrentCalls_AllSucceed
+- 4 PASS (허용): CreateWorkflow_AuditFail_RollsBack (에러 동작 검증), GRPCServer_RegisterAndConnect, GRPCServer_Serve_AcceptsConnection, PrometheusMetrics_RPCCounter
+
+**RED 상태 확인**:
+- `go build ./apps/control-plane/...` → PASS
+- `go vet ./apps/control-plane/internal/server/...` → PASS (0 오류)
+- `golangci-lint run ./apps/control-plane/internal/server/...` → PASS (0 오류)
+- `go test ./apps/control-plane/internal/server/...` → 8 FAIL / 4 PASS (정상 RED)
+- Sprint 1+2+3 단위 테스트 40개 회귀 없음: audit PASS, store PASS, workflow PASS
+
+**Proto Codegen 결정**: protoc/buf 미설치 환경에서 hand-written 방식 채택. GREEN 단계에서 protoc-gen-go 설치 후 buf generate 로 교체 예정.
+
+**에러 Delta**: +0 (기존 LSP baseline 변동 없음)
+
+---
+
 ## 향후 Sprint
 
 | Sprint | REQ | 예상 시작 |
 |--------|-----|---------|
-| Sprint 3 GREEN | REQ-CTRL-004 PostgreSQL Store pgx 구현 | Sprint 3 RED 완료 후 |
-| Sprint 4 | REQ-CTRL-002 gRPC Server | Sprint 3 완료 후 |
+| Sprint 4 GREEN | REQ-CTRL-002 gRPC Server 비즈니스 로직 구현 | Sprint 4 RED 완료 후 |
 | Sprint 5 | REQ-CTRL-003 REST API (gRPC-Gateway) | Sprint 4 완료 후 |
 | Sprint 6 | REQ-CTRL-005 Celery Dispatch (miniredis) | Sprint 5 완료 후 |
 | Sprint 7 | E2E Integration (docker-compose) | Sprint 6 완료 후 |
