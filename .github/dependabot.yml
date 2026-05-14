@@ -1,0 +1,148 @@
+# Dependabot — 의존성 자동 보안 패치 + 마이너 업데이트 PR
+# 주간 화요일 09:00 KST (00:00 UTC) 스케줄
+# 보안 취약점은 즉시 PR (cron 무관)
+
+version: 2
+
+updates:
+  # ============================================================
+  # Python (pyproject.toml + uv.lock)
+  # ============================================================
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "00:00"
+      timezone: "Asia/Seoul"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "python"
+    groups:
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+      python-security:
+        applies-to: security-updates
+        update-types:
+          - "patch"
+          - "minor"
+          - "major"
+    ignore:
+      # torch 메이저 업데이트는 GPU/CPU 빌드 호환성 검증 필요 — 수동 처리
+      - dependency-name: "torch"
+        update-types: ["version-update:semver-major"]
+
+  # ============================================================
+  # Go (go.mod)
+  # ============================================================
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "00:00"
+      timezone: "Asia/Seoul"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps-go)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "go"
+    groups:
+      go-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+      go-security:
+        applies-to: security-updates
+        update-types:
+          - "patch"
+          - "minor"
+          - "major"
+    ignore:
+      # gRPC 메이저 업데이트는 proto 재생성 필요 — 수동 처리
+      - dependency-name: "google.golang.org/grpc"
+        update-types: ["version-update:semver-major"]
+      # testcontainers-go 메이저는 API 변경 가능 — 수동 처리
+      - dependency-name: "github.com/testcontainers/testcontainers-go"
+        update-types: ["version-update:semver-major"]
+
+  # ============================================================
+  # GitHub Actions (.github/workflows/*.yml)
+  # ============================================================
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "00:00"
+      timezone: "Asia/Seoul"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci(deps)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "ci"
+    groups:
+      github-actions:
+        update-types:
+          - "minor"
+          - "patch"
+          - "major"  # GitHub Actions는 메이저도 SHA 핀 통해 안전
+
+  # ============================================================
+  # Docker (Dockerfile + docker-compose.yml)
+  # ============================================================
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "00:00"
+      timezone: "Asia/Seoul"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "docker"
+    ignore:
+      # postgres / redis 메이저 업데이트는 데이터 호환성 검증 필요
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "redis"
+        update-types: ["version-update:semver-major"]
+
+  # ============================================================
+  # Helm Charts (deployments/helm/)
+  # ============================================================
+  - package-ecosystem: "helm"
+    directory: "/deployments/helm/iroum-ax"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "00:00"
+      timezone: "Asia/Seoul"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(helm)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "helm"
+
+# ============================================================
+# 보안 정책:
+# - 모든 PR은 CI(lint + test + security)를 통과해야 머지 가능
+# - 보안 취약점은 dependabot이 즉시 PR (cron 무관) — 24시간 이내 리뷰 권장
+# - 메이저 버전 업데이트는 일부 의존성에서 자동 차단 (수동 검증 필요)
+# ============================================================

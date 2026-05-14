@@ -1,0 +1,129 @@
+# Pre-commit hooks — 로컬 git commit 시 자동 품질 검증
+# 설치: pip install pre-commit && pre-commit install
+# 수동 실행: pre-commit run --all-files
+# 참고: docs/contributing.md
+
+default_language_version:
+  python: python3.11
+  golang: 1.22
+
+# 커밋 시간 단축 — 변경된 파일만 실행
+default_stages: [pre-commit]
+
+repos:
+  # ============================================================
+  # 보안 — 비밀 키 / 토큰 / 자격증명 누출 차단 (최우선)
+  # ============================================================
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        name: 비밀 키 누출 감지
+        args: ['--baseline', '.secrets.baseline']
+        exclude: |
+          (?x)^(
+            uv.lock|
+            go.sum|
+            tests/fixtures/synthetic/.*|
+            .*\.golden$
+          )$
+
+  # ============================================================
+  # 일반 — 파일 정합성 (모든 언어)
+  # ============================================================
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        name: 후행 공백 제거
+        exclude: \.md$  # Markdown 두 칸 후행은 line break 의미
+      - id: end-of-file-fixer
+        name: EOF newline 보장
+      - id: check-yaml
+        name: YAML 구문 검증
+        args: ['--unsafe']  # GitHub Actions ${{ }} 허용
+      - id: check-json
+        name: JSON 구문 검증
+        exclude: tests/fixtures/synthetic/.*\.json$  # 한국어 fixture 허용
+      - id: check-toml
+        name: TOML 구문 검증
+      - id: check-merge-conflict
+        name: 머지 충돌 마커 감지
+      - id: check-added-large-files
+        name: 대용량 파일 차단 (5MB 초과)
+        args: ['--maxkb=5120']
+        exclude: tests/fixtures/kepco/.*  # KEPCO 실제 데이터는 .gitignore + 별도 정책
+
+  # ============================================================
+  # Python — ruff (lint + format)
+  # ============================================================
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        name: Python ruff lint
+        args: ['--fix', '--exit-non-zero-on-fix']
+        files: \.py$
+      - id: ruff-format
+        name: Python ruff format
+        files: \.py$
+
+  # ============================================================
+  # Go — gofmt + golangci-lint
+  # ============================================================
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-fmt
+        name: Go gofmt
+        files: \.go$
+      - id: golangci-lint
+        name: Go golangci-lint
+        args: ['--timeout=2m']
+        files: \.go$
+
+  # ============================================================
+  # YAML — yamllint (CI workflows, helm values)
+  # ============================================================
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        name: YAML 스타일 검증
+        args: ['-d', 'relaxed']
+        files: \.(yml|yaml)$
+        exclude: ^\.github/workflows/.*\.yml$  # GitHub Actions 자체 검증
+
+  # ============================================================
+  # Markdown — markdownlint
+  # ============================================================
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.42.0
+    hooks:
+      - id: markdownlint
+        name: Markdown lint
+        args: ['--disable', 'MD013', 'MD033', 'MD041']  # 라인 길이/HTML/H1 허용
+        files: \.md$
+        exclude: |
+          (?x)^(
+            \.moai/specs/.*|
+            \.moai/sprints/.*|
+            \.moai/reports/.*|
+            CHANGELOG\.md
+          )$
+
+  # ============================================================
+  # Conventional Commits — commitlint
+  # ============================================================
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.6.0
+    hooks:
+      - id: conventional-pre-commit
+        name: Conventional Commits 형식 검증
+        stages: [commit-msg]
+        args: [feat, fix, docs, style, refactor, perf, test, chore, ci, build, security, demo]
+
+# ============================================================
+# CI 환경에서는 pre-commit 자체적으로 동작하지 않음
+# GitHub Actions CI에서는 별도 ruff + golangci-lint job 실행 중
+# ============================================================
