@@ -93,12 +93,45 @@
 
 ---
 
+---
+
+## Sprint 3: REQ-CTRL-004 PostgreSQL Store (진행 중)
+
+| 날짜 | 단계 | AC 완료 | 에러 Delta | 상태 |
+|------|------|---------|-----------|------|
+| 2026-05-14 | RED | 0/4 (REQ-CTRL-004 AC 기준) | +0 | COMPLETE |
+
+**Sprint 3 RED 산출물**:
+- `.moai/sprints/SPEC-AX-CTRL-001/sprint-REQ-CTRL-004.md` — Sprint Contract (Functionality + Security 우선)
+- `apps/control-plane/internal/store/pg_store.go` — PgWorkflowStore + PgWorkflowTx stub (ErrNotImplemented)
+- `apps/control-plane/internal/store/postgres_test.go` — 11개 통합 테스트 (//go:build integration)
+- `apps/control-plane/internal/store/testdata/schema.sql` — 통합 테스트용 PostgreSQL 스키마
+
+**Sprint 3 목표 AC** (4개):
+- [ ] AC-CTRL-004-1 (Pool 초기화 Fail-Fast + CRUD 왕복)
+- [ ] AC-CTRL-004-2 (audit_logs JSONB INSERT)
+- [ ] AC-CTRL-004-3 (SELECT FOR UPDATE 직렬화 + 풀 고갈)
+- [ ] AC-CTRL-004-4 (mid-tx 실패 롤백)
+
+**실제 통합 테스트 수**: 11개 (//go:build integration)
+**RED 상태 확인**:
+- `go build -tags=integration ./apps/control-plane/internal/store/...` → PASS
+- `go vet -tags=integration ./apps/control-plane/internal/store/...` → PASS
+- `golangci-lint run --build-tags=integration ./apps/control-plane/...` → PASS
+- `go test -tags=integration ./apps/control-plane/internal/store/ -v -count=1`:
+  - 10 FAIL (ErrNotImplemented — 정상 RED 상태)
+  - 1 PASS (TestPgStore_Integration_NewPgWorkflowStore_InvalidDSN — DSN 실패는 stub에도 동작)
+- Sprint 1+2 단위 테스트 회귀 없음: audit PASS, store PASS, workflow PASS
+
+**testcontainers**: Docker 사용 가능, postgres:16-alpine 컨테이너 정상 스폰 확인
+
+---
+
 ## 향후 Sprint
 
 | Sprint | REQ | 예상 시작 |
 |--------|-----|---------|
-| Sprint 2 GREEN | REQ-CTRL-001 State Machine 구현 | Sprint 2 RED 완료 후 |
-| Sprint 3 | REQ-CTRL-004 PostgreSQL Store (testcontainers) | Sprint 2 완료 후 |
+| Sprint 3 GREEN | REQ-CTRL-004 PostgreSQL Store pgx 구현 | Sprint 3 RED 완료 후 |
 | Sprint 4 | REQ-CTRL-002 gRPC Server | Sprint 3 완료 후 |
 | Sprint 5 | REQ-CTRL-003 REST API (gRPC-Gateway) | Sprint 4 완료 후 |
 | Sprint 6 | REQ-CTRL-005 Celery Dispatch (miniredis) | Sprint 5 완료 후 |
