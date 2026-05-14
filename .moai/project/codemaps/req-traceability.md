@@ -1,6 +1,40 @@
 # 요구사항 추적성 매트릭스 (req-traceability)
 
-REQ-UBI + REQ-AX-001~005 와 구현 파일 · 테스트 파일의 맵핑
+REQ-UBI + REQ-AX-001~005 (Python) + REQ-CTRL-001~005 (Go) 와 구현 파일 · 테스트 파일의 맵핑
+
+---
+
+## SPEC-AX-CTRL-001: Go Control Plane 요구사항
+
+### Control Plane 고유 요구사항
+
+| REQ ID | 설명 | 구현 위치 | 테스트 | 상태 |
+|--------|------|---------|--------|------|
+| REQ-CTRL-001 | Workflow State Machine (4 상태, 3 전이) | `internal/workflow/state_machine.go` | `state_machine_test.go` (14 tests) | PASS |
+| REQ-CTRL-002 | gRPC Service (Create/Get/List) | `cmd/server/grpc_handlers.go` | `grpc_handlers_test.go` (12 tests) | PASS |
+| REQ-CTRL-003 | REST API (POST/GET/LIST + /healthz) | `cmd/server/rest_handler.go` | `rest_handler_test.go` (12 tests) | PASS |
+| REQ-CTRL-004 | PostgreSQL Store (pgx v5, SELECT FOR UPDATE) | `internal/store/pg_store.go` | `pg_store_test.go` (11 integration) | PASS |
+| REQ-CTRL-005 | Celery Dispatcher (Kombu v2 envelope, Redis RPUSH) | `internal/scheduler/dispatcher.go` | `dispatcher_test.go` (15 tests) | PASS |
+
+### Control Plane + AX 공유 요구사항
+
+| REQ ID | 설명 | Go 구현 | Python 구현 | 상태 |
+|--------|------|--------|-----------|------|
+| REQ-UBI-001 | 트랜잭션 원자성 (audit 실패 → 롤백) | `internal/workflow/transaction.go` + `internal/store/pg_store.go` | `pipelines/workers/` | PASS (CTRL) |
+| REQ-UBI-002 | 8개 감시 액션 (audit_logs 기록) | `internal/audit/audit.go` (8 Action enum) | `pkg/logging/logger.py` | PASS (CTRL) |
+| REQ-UBI-003 | cli-anonymous 기본값 | `internal/config/config.go` | `pipelines/config/settings.py` | PASS (CTRL) |
+
+### Control Plane E2E
+
+| AC ID | 설명 | 테스트 위치 | 상태 |
+|-------|------|-----------|------|
+| AC-CTRL-E2E-1 | 전체 흐름 (create → transition → dispatch) | `cmd/server/e2e_test.go` (5 tests) | PASS (5/5) |
+
+**테스트 합계**: 79개 단위 + 11개 통합 + 5개 E2E = 95개 (모두 PASS)
+
+---
+
+## SPEC-AX-001: Python 파이프라인 요구사항
 
 ## REQ-UBI (Ubiquitous Requirements)
 

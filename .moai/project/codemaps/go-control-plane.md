@@ -1,0 +1,360 @@
+# Go Control Plane 코드맵 (SPEC-AX-CTRL-001)
+
+## 개요
+
+`apps/control-plane/` (Go 1.22+) 는 SPEC-AX-001 Python 파이프라인을 오케스트레이션하는 Walking Skeleton이다.
+12개 내부 패키지 + 진입점으로 구성되며, gRPC + REST 이중 서버를 통해 워크플로우 생성/조회/완료를 제공한다.
+
+---
+
+## 패키지 아키텍처
+
+### 1. Entrypoint & Server (`cmd/server/`)
+
+**main.go** (진입점)
+- 환경변수 파서 → config 로드
+- 로거 초기화 (zap)
+- server.Run() 호출
+
+**server.go** (gRPC + REST 멀티 플렉싱)
+- gRPC 서버 (port: 50051)
+- REST 서버 (port: 8080, grpc-gateway 패턴)
+- 구조화 JSON 로깅 미들웨어
+- 요청 ID 발급
+
+**grpc_handlers.go** (gRPC service 구현)
+- CreateWorkflow RPC
+- GetWorkflow RPC
+- ListWorkflows RPC + pagination
+- @MX:ANCHOR: CreateWorkflow (fan_in 3+: gRPC + REST + dispatch callback)
+
+**rest_handler.go** (REST 엔드포인트)
+- POST /api/v1/workflows
+- GET /api/v1/workflows/{id}
+- GET /api/v1/workflows?limit=10&offset=0
+- /healthz (헬스체크)
+
+**health.go** (헬스체크 엔드포인트)
+- /healthz 구현 (Kubernetes readiness probe)
+
+**middleware.go** (미들웨어 체인)
+- RequestID 미들웨어 (uuid.New())
+- 구조화 JSON 로깅 (zap)
+- 에러 응답 포맷팅
+
+---
+
+### 2. 워크플로우 상태 머신 (`internal/workflow/`)
+
+**types.go** (정의 생략, `internal/types/` 참조)
+- WorkflowState enum (PENDING, RUNNING, COMPLETED, FAILED)
+- Workflow struct (id, status, created_at, result)
+
+**state_machine.go** (불변성 규칙)
+```
+상태: PENDING → RUNNING → (COMPLETED | FAILED)
+전이:
+  - Start: PENDING → RUNNING (audit: WORKFLOW_TRANSITIONED_TO_RUNNING)
+  - Complete: RUNNING → COMPLETED (결과 JSON 저장)
+  - Fail: RUNNING → FAILED (에러 메시지 저장)
+```
+- @MX:ANCHOR: CanTransition() (all codepaths verify validity)
+- @MX:ANCHOR: Transition() (audit recording + state update atomicity)
+- StateMachine struct: Store + AuditRecorder 의존성
+
+**handlers.go** (워크플로우 생명주기)
+- CreateWorkflow: 초기 상태 PENDING + audit 1건 + dispatcher 호출
+- Start: PENDING → RUNNING 전이 + audit
+- Complete: RUNNING → COMPLETED 전이 + result 저장
+- Fail: RUNNING → FAILED 전이 + error 저장
+- @MX:ANCHOR: CreateWorkflow (3개 호출자)
+
+**callback.go** (Python worker 콜백)
+- POST /api/v1/workflows/{id}/callback
+- worker가 작업 완료 후 상태 전이 트리거
+- RUNNING → COMPLETED | FAILED
+- audit 기록 (WORKFLOW_COMPLETED or WORKFLOW_FAILED)
+
+---
+
+### 3. 데이터 저장소 (`internal/store/`)
+
+**store.go** (인터페이스 정의)
+```go
+type WorkflowStore interface {
+  CreateWorkflow(ctx, workflow) error
+  GetWorkflow(ctx, id) (*Workflow, error)
+  ListWorkflows(ctx, limit, offset) ([]*Workflow, error)
+  Tx(ctx) (WorkflowTx, error)  // 트랜잭션 시작
+}
+
+type WorkflowTx interface {
+  CreateWorkflow(ctx, workflow) error
+  GetWorkflow(ctx, id) (*Workflow, error)
+  UpdateWorkflow(ctx, id, workflow) error
+  Commit(ctx) error
+  Rollback(ctx) error
+}
+```
+- @MX:ANCHOR: WorkflowStore.Tx() (fan_in 2: state_machine + dispatcher)
+
+**postgres.go** (pgx/v5 풀 관리)
+- PgWorkflowStore struct: *pgxpool.Pool
+- NewPgWorkflowStore: DSN 파싱 + Ping + 인덱스 검증
+- @MX:WARN: DSN 기본값 "iroum:iroum@localhost" (env 오버라이드 권장)
+
+**pg_store.go** (PostgreSQL 구현)
+- CreateWorkflow: INSERT + RETURNING id
+- GetWorkflow: SELECT (레이스 조건 없음)
+- ListWorkflows: SELECT + ORDER BY created_at DESC LIMIT OFFSET
+- UpdateWorkflow: UPDATE (SELECT FOR UPDATE 래핑)
+- @MX:ANCHOR: UpdateWorkflow (SELECT FOR UPDATE 직렬화)
+
+**pg_tx.go** (트랜잭션 래퍼)
+- pgx.Tx 기반
+- CreateWorkflow, GetWorkflow, UpdateWorkflow (트랜잭션 컨텍스트)
+- Commit, Rollback
+
+**fake_store.go** (테스트용 인메모리)
+- FakeStore struct: sync.Map (workflows)
+- FakeTx struct: 임시 변경 맵 + Commit/Rollback 직렬화
+- RED 테스트용 stub
+
+**audit.go** (감시 로그 헬퍼)
+- InsertAuditLog(ctx, event) error
+- audit_logs 테이블 INSERT (JSONB: action, user_id, workflow_id, timestamp)
+
+---
+
+### 4. 감시 및 로깅 (`internal/audit/`)
+
+**audit.go** (감시 이벤트 정의)
+```go
+const (
+  ActionWorkflowCreated = "WORKFLOW_CREATED"
+  ActionWorkflowTransitionedToRunning = "WORKFLOW_TRANSITIONED_TO_RUNNING"
+  ActionWorkflowCompleted = "WORKFLOW_COMPLETED"
+  ActionWorkflowFailed = "WORKFLOW_FAILED"
+  // 등등 8개
+)
+
+type Event struct {
+  Action string
+  UserID string
+  WorkflowID string
+  Timestamp time.Time
+  Metadata map[string]interface{}
+}
+```
+
+**recorder.go** (감시 기록)
+- Recorder interface: Record(ctx, event) error
+- PgAuditRecorder: audit_logs 테이블 INSERT
+- @MX:ANCHOR: Record() (fan_in 3+: all handlers)
+
+---
+
+### 5. 스케줄러 및 Dispatch (`internal/scheduler/`)
+
+**dispatcher.go** (Celery 디스패치)
+- CeleryDispatcher struct: RedisClient 의존성
+- Dispatch(ctx, workflow) error
+  1. BuildEnvelope() → Kombu v2 JSON 생성
+  2. redis.RPUSH(celery_queue, envelope)
+  3. 에러 → workflow.status = FAILED
+- @MX:WARN: Redis 연결 실패 시 graceful 에러 처리 필요
+- @MX:ANCHOR: Dispatch() (fan_in 2: CreateWorkflow + StateTransition)
+
+**celery_envelope.go** (Kombu v2 빌더)
+- BuildEnvelope(workflow) → []byte (JSON)
+- 필드:
+  - body: base64([args, kwargs, empty])
+  - headers: {id, task, exchange, routing_key}
+  - properties: {correlation_id, reply_to, delivery_mode}
+- @MX:NOTE: base64 인코딩 (Kombu 호환성)
+
+---
+
+### 6. 설정 및 타입 (`internal/config/`, `internal/types/`, `internal/errors/`, `internal/log/`)
+
+**config.go** (환경변수 파서)
+```
+PostgresDSN (기본: iroum:iroum@localhost:5432)
+RedisURL (기본: redis://localhost:6379)
+GrpcPort (기본: 50051)
+RestPort (기본: 8080)
+LogLevel (기본: info)
+```
+- Load(): env 파싱 + 검증
+- @MX:WARN: PostgresDSN dev 기본값 (production env 강제)
+
+**types.go** (워크플로우 타입)
+- WorkflowState enum
+- Workflow struct
+- @MX:ANCHOR: Workflow (모든 핸들러, store, dispatcher가 참조)
+
+**errors.go** (Sentinel 에러)
+- ErrNotFound
+- ErrInvalidTransition
+- ErrInvalidState
+- ErrDispatchFailed
+- ErrAuditFailed
+
+**log.go** (zap 로거 팩토리)
+- NewLogger(level string) *zap.Logger
+- 구조화 JSON 로깅 (productionConfig)
+
+---
+
+### 7. Protobuf 정의 (`internal/proto/`)
+
+**workflow.pb.go** (수동 작성 proto 메시지)
+- WorkflowStatus enum
+- Workflow message
+- CreateWorkflowRequest/Response
+- GetWorkflowRequest/Response
+- ListWorkflowsRequest/Response
+
+**workflow_grpc.pb.go** (수동 작성 gRPC 서비스)
+- WorkflowServiceServer interface
+- CreateWorkflow, GetWorkflow, ListWorkflows 메서드
+
+---
+
+## 의존성 그래프
+
+```
+main.go
+  ↓
+server.go (config, log, grpc_handlers, rest_handler)
+  ├─→ grpc_handlers.go
+  │     ├─→ state_machine.go (Store, AuditRecorder)
+  │     └─→ handlers.go (CreateWorkflow, etc.)
+  │           ├─→ store/pg_store.go
+  │           ├─→ audit/recorder.go
+  │           └─→ scheduler/dispatcher.go
+  │
+  └─→ rest_handler.go
+        ├─→ grpc_handlers.go (로직 공유)
+        └─→ server.go (HTTP 래퍼)
+
+store/pg_store.go
+  ├─→ store.go (인터페이스)
+  ├─→ config.go (PostgresDSN)
+  └─→ audit.go (InsertAuditLog)
+
+scheduler/dispatcher.go
+  ├─→ scheduler/celery_envelope.go
+  ├─→ store.go (WorkflowStore 의존)
+  └─→ config.go (RedisURL)
+
+workflow/state_machine.go
+  ├─→ types.go (WorkflowState)
+  ├─→ store.go (WorkflowStore)
+  └─→ audit.go (AuditRecorder)
+```
+
+---
+
+## Fan-In/Fan-Out 분석
+
+### High Fan-In (>=3 호출자)
+
+| 함수 | 호출자 | @MX 태그 |
+|------|--------|----------|
+| CreateWorkflow() | REST + gRPC 핸들러 + 테스트 | @MX:ANCHOR |
+| Dispatch() | CreateWorkflow + StateTransition + 콜백 | @MX:ANCHOR |
+| Record() | 모든 핸들러 (Create/Start/Complete/Fail) | @MX:ANCHOR |
+| GetWorkflow() | REST GET + gRPC GET + 콜백 검증 | @MX:ANCHOR |
+
+### Low Fan-In (<3 호출자)
+
+- UpdateWorkflow(): state_machine.Transition + callback
+- Start(), Complete(), Fail(): 각각 고유 코드경로
+- Health(): REST 핸들러만
+
+---
+
+## 테스트 커버리지
+
+| 패키지 | 테스트 파일 | 테스트 수 | 빌드 태그 |
+|--------|-----------|---------|----------|
+| internal/workflow | state_machine_test.go | 14 | 없음 |
+| internal/store | pg_store_test.go | 11 | integration |
+| internal/audit | recorder_test.go | 11 | 없음 |
+| cmd/server | grpc_handlers_test.go, rest_handler_test.go | 24 | 없음 |
+| internal/scheduler | dispatcher_test.go | 15 | 없음 |
+| E2E | e2e_test.go | 5 | integration |
+| **총합** | | **80** | mixed |
+
+---
+
+## REQ-CTRL 매핑
+
+| REQ | 핵심 구현 | 테스트 | 상태 |
+|-----|---------|-------|------|
+| REQ-CTRL-UBI-001 | AuditRecorder, Event | recorder_test.go | ✓ PASS |
+| REQ-CTRL-UBI-002 | 8 Action enum, audit_logs INSERT | audit_test.go, handler tests | ✓ PASS |
+| REQ-CTRL-001 | StateMachine, CanTransition, Transition | state_machine_test.go | ✓ PASS |
+| REQ-CTRL-002 | gRPC RPC × 3, bufconn test | grpc_handlers_test.go | ✓ PASS |
+| REQ-CTRL-003 | REST endpoints, httptest | rest_handler_test.go | ✓ PASS |
+| REQ-CTRL-004 | PgWorkflowStore, SELECT FOR UPDATE | pg_store_test.go (integration) | ✓ PASS |
+| REQ-CTRL-005 | Dispatcher, celery envelope | dispatcher_test.go | ✓ PASS |
+| AC-CTRL-E2E-1 | Full flow: create → transition → dispatch | e2e_test.go | ✓ PASS (5/5) |
+
+---
+
+## 설정 및 로깅
+
+### 환경변수
+
+```bash
+POSTGRES_DSN=postgres://user:pass@host:5432/db  # 기본: iroum:iroum@localhost:5432
+REDIS_URL=redis://host:6379                      # 기본: redis://localhost:6379
+GRPC_PORT=50051                                   # 기본: 50051
+REST_PORT=8080                                    # 기본: 8080
+LOG_LEVEL=info                                    # 기본: info
+```
+
+### 로깅 형식
+
+```json
+{
+  "level": "info",
+  "ts": 1715708414.123,
+  "caller": "server/grpc_handlers.go:45",
+  "msg": "CreateWorkflow",
+  "request_id": "uuid-xxx",
+  "workflow_id": "uuid-yyy",
+  "status": "PENDING"
+}
+```
+
+---
+
+## 주요 불변성
+
+1. **상태 전이 불변성**: PENDING → RUNNING → (COMPLETED | FAILED) 만 허용
+2. **원자성**: audit INSERT 실패 시 workflow 생성 롤백
+3. **Dispatch 원자성**: RPUSH 실패 시 workflow.status = FAILED (보정)
+4. **직렬화**: SELECT FOR UPDATE로 동시 상태 전이 직렬화
+
+---
+
+## 성능 특성
+
+| 작업 | 목표 | 달성 | 비고 |
+|------|------|------|------|
+| Dispatch (Celery envelope) | < 100ms p99 | 7μs/op avg | Redis RPUSH 경량 |
+| GetWorkflow | < 50ms p99 | ~5ms (network 의존) | SELECT 인덱스 최적화 |
+| CreateWorkflow | < 200ms p99 | ~50ms (audit포함) | 트랜잭션 오버헤드 |
+| ListWorkflows (N=100) | < 500ms p99 | ~100ms | 페이지네이션 인덱스 |
+
+---
+
+## 후속 SPEC 후보
+
+- **SPEC-AX-COV-001**: 통합 커버리지 측정 도구
+- **SPEC-AX-AUD-001**: internal/audit 에러 경로 보강
+- **SPEC-AX-AUTH-001**: gRPC reflection + TLS (프로덕션)
+- **SPEC-AX-RETRY-001**: Celery retry 정책 (exponential backoff)

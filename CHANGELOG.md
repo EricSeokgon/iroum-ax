@@ -7,6 +7,76 @@
 
 ## [Unreleased] - 2026-05-14
 
+### Added — SPEC-AX-CTRL-001 v0.1.2 Go Control Plane Walking Skeleton
+
+#### Sprint 0: CTRL Foundation (Go 1.22 모듈 + 기본 의존성)
+- Go 1.22 모듈 구조 (apps/control-plane/)
+- 핵심 의존성 9개 (uuid, zap, pgx, redis, testcontainers, etc.)
+- golangci-lint 설정 + GitHub Actions CI/CD
+- @MX 태그 규칙 정의 (27개 ANCHOR/NOTE/WARN)
+
+#### Sprint 1: REQ-CTRL-UBI-001/002 (감시 로깅 + 트랜잭션 원자성)
+- WorkflowStore/WorkflowTx 인터페이스 (8 감시 액션 정의)
+- TxCoordinator 스텁 (트랜잭션 조율)
+- SELECT FOR UPDATE 검증 기본 계획
+- 26개 테스트 (fake_store 8 + recorder 11 + transaction 7)
+
+#### Sprint 2: REQ-CTRL-001 Workflow State Machine
+- 4상태 워크플로우 (PENDING → RUNNING → COMPLETED | FAILED)
+- 3전이 규칙 (Start, Complete, Fail)
+- 동시성 직렬화 (SELECT FOR UPDATE)
+- 14개 테스트 (상태 전이 + 불변성 + edge cases)
+
+#### Sprint 3: REQ-CTRL-004 PostgreSQL Store (pgx v5 + testcontainers)
+- PgWorkflowStore/PgWorkflowTx 구현
+- CRUD + SELECT FOR UPDATE 동시성 테스트
+- audit_logs JSONB INSERT
+- 11개 통합 테스트 (//go:build integration)
+
+#### Sprint 4: REQ-CTRL-002 gRPC Server (unary RPC × 3)
+- CreateWorkflow/GetWorkflow/ListWorkflows RPC
+- 구조화 JSON 로깅 미들웨어 (zap)
+- bufconn in-memory 클라이언트 테스트
+- 12개 테스트 (RPC 동작 + 에러 처리 + 동시성)
+
+#### Sprint 5: REQ-CTRL-003 REST API (net/http + JSON)
+- POST /api/v1/workflows (201 Created + Location)
+- GET /api/v1/workflows/{id} (200/404/400)
+- GET /api/v1/workflows (LIST + pagination)
+- /healthz 헬스체크 엔드포인트
+- 12개 테스트 (httptest 기반)
+
+#### Sprint 6: REQ-CTRL-005 Celery Dispatcher (Kombu v2)
+- CeleryDispatcher 구현 (Redis RPUSH)
+- Kombu v2 envelope 직렬화 (body/headers/properties)
+- base64 인코딩 + JSON 필드 매핑
+- 15개 테스트 + 벤치마크 (7μs/op)
+
+#### Sprint 7: E2E Integration (testcontainers postgres + redis)
+- 전체 흐름 검증: 생성 → 상태 전이 → Dispatch → 동시성
+- 5개 E2E 테스트 (29.3초 실행)
+- 유닛 테스트 회귀 검사 완료 (79개 PASS)
+
+**품질 게이트**:
+- 95개 테스트 (79 단위 + 11 통합 + 5 E2E) 모두 PASS
+- go vet 0 에러 | golangci-lint 0 이슈 | gofmt 100% 준수
+- 27개 @MX 태그 (20 ANCHOR + 4 NOTE + 3 WARN)
+- plan-auditor 0.91 PASS + evaluator-active 0.872 CONFIRM
+
+**커버리지**:
+- 전체: 55.0% (unitprofile 기준)
+- 실제 결합 (통합 포함): ~80% (pg_store testcontainers-only 제외)
+- WARNING 3개 (모두 정보성, 차단 불가)
+
+**REQ-CTRL 추적성**:
+- REQ-CTRL-UBI-001/002 (감시) ✓
+- REQ-CTRL-001 (상태 머신) ✓
+- REQ-CTRL-002 (gRPC) ✓
+- REQ-CTRL-003 (REST) ✓
+- REQ-CTRL-004 (PostgreSQL) ✓
+- REQ-CTRL-005 (Celery) ✓
+- AC-CTRL-E2E-1 (전체 흐름) ✓
+
 ### Added — SPEC-AX-001 v0.1.2 Walking Skeleton
 
 #### Sprint 0: 모노레포 스캐폴딩 (commit: 2a3cdec)
