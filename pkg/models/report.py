@@ -6,13 +6,13 @@
 """
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class Grade(str, Enum):
+class Grade(StrEnum):
     """경영평가 등급"""
 
     A = "A"

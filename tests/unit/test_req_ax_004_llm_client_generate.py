@@ -15,10 +15,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-from pkg.models.report import GenerationResult
 from pipelines.generation.llm_client import LLMClient  # type: ignore[import] -- Sprint 1 존재
-
+from pkg.models.report import GenerationResult
 
 # ============================================================
 # 테스트 픽스처

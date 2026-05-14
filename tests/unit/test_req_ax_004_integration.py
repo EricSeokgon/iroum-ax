@@ -8,14 +8,12 @@ AC-004-3: Qwen fallback 경로 model_used 추적
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-
+from pipelines.generation.report_drafter import ReportDrafter  # type: ignore[import]
 from pkg.models.criterion import Criterion
 from pkg.models.report import DraftSection, GenerationResult, StyleReport
-from pipelines.generation.report_drafter import ReportDrafter  # type: ignore[import]
-
 
 # ============================================================
 # 테스트 픽스처

@@ -8,10 +8,7 @@ AC-005-1: feasibility_score 내림차순 정렬 + 3-5개 캡
 """
 from __future__ import annotations
 
-import pytest
-
 from pkg.models.recommendation import ContentSuggestion, GapItem, RankedSuggestion
-
 
 # ============================================================
 # 공통 헬퍼 — ContentSuggestion + GapItem 조합 생성

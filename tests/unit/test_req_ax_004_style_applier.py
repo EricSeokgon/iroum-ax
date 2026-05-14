@@ -9,10 +9,8 @@ AC-004-2: 스타일 위반 감지 → 재시도 루프 트리거
 from __future__ import annotations
 
 import pytest
-
-from pkg.models.report import StyleReport
 from pipelines.generation.style_applier import StyleApplier  # type: ignore[import]
-
+from pkg.models.report import StyleReport
 
 # ============================================================
 # 테스트 픽스처

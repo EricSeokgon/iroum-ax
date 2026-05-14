@@ -66,7 +66,10 @@ class Settings(BaseSettings):
     postgres_host: str = Field(default="localhost", description="PostgreSQL 호스트")
     postgres_port: int = Field(default=5432, description="PostgreSQL 포트")
     postgres_user: str = Field(default="ax", description="PostgreSQL 사용자")
-    postgres_password: str = Field(default="devpass", description="PostgreSQL 비밀번호")
+    postgres_password: str = Field(
+        default="",
+        description="PostgreSQL 비밀번호 (운영 환경에서는 POSTGRES_PASSWORD 환경변수로 주입 필수)",
+    )
     postgres_db: str = Field(default="iroum_ax", description="PostgreSQL 데이터베이스명")
 
     @property

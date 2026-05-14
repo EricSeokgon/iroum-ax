@@ -13,7 +13,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 # =============================================================================
 # 픽스처
 # =============================================================================
@@ -53,7 +52,6 @@ class TestTableExtractorInterface:
         Then: list[Table] 반환
         """
         from pipelines.ingestion.table_extractor import TableExtractor  # type: ignore[import]
-        from pkg.models.document import Table  # type: ignore[import]
 
         extractor = TableExtractor()
         with patch.object(extractor, "_detect_cells", return_value=[
@@ -109,9 +107,8 @@ class TestTableExtractorRotatedPage:
         with patch.object(extractor, "_detect_cells", return_value=[
             {"row": 0, "col": 0, "text": "헤더1", "rotation": 90},
             {"row": 0, "col": 1, "text": "헤더2", "rotation": 90},
-        ]):
-            with patch.object(extractor, "_detect_rotation", return_value=90):
-                tables = extractor.extract(rotated_image_path)
+        ]), patch.object(extractor, "_detect_rotation", return_value=90):
+            tables = extractor.extract(rotated_image_path)
         assert len(tables) > 0
         assert tables[0].rotation == 90
 
@@ -133,9 +130,8 @@ class TestTableExtractorRotatedPage:
             {"row": 0, "col": 1, "text": "헤더2", "rotation": 90},
             {"row": 1, "col": 0, "text": "값1", "rotation": 90},
             {"row": 1, "col": 1, "text": "값2", "rotation": 90},
-        ]):
-            with patch.object(extractor, "_detect_rotation", return_value=90):
-                tables = extractor.extract(rotated_image_path)
+        ]), patch.object(extractor, "_detect_rotation", return_value=90):
+            tables = extractor.extract(rotated_image_path)
         assert len(tables) > 0
         table = tables[0]
         # 2행 2열 구조 확인
@@ -159,9 +155,8 @@ class TestTableExtractorRotatedPage:
             {"row": 0, "col": 1, "text": "헤더2", "rotation": 90},
             {"row": 1, "col": 0, "text": "값1", "rotation": 90},
             {"row": 1, "col": 1, "text": "값2", "rotation": 90},
-        ]):
-            with patch.object(extractor, "_detect_rotation", return_value=90):
-                tables = extractor.extract(rotated_image_path)
+        ]), patch.object(extractor, "_detect_rotation", return_value=90):
+            tables = extractor.extract(rotated_image_path)
         assert tables[0].rows[0][0] == "헤더1"
 
     def test_normal_table_should_have_rotation_zero(
@@ -178,8 +173,7 @@ class TestTableExtractorRotatedPage:
         extractor = TableExtractor()
         with patch.object(extractor, "_detect_cells", return_value=[
             {"row": 0, "col": 0, "text": "헤더1"},
-        ]):
-            with patch.object(extractor, "_detect_rotation", return_value=0):
-                tables = extractor.extract(normal_image_path)
+        ]), patch.object(extractor, "_detect_rotation", return_value=0):
+            tables = extractor.extract(normal_image_path)
         if len(tables) > 0:
             assert tables[0].rotation == 0

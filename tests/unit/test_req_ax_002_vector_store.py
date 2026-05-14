@@ -9,10 +9,9 @@ pgvector HNSW 인터페이스의 계약을 정의한다.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-
 from pkg.models.criterion import Criterion, CriterionMatch
 
 
@@ -93,7 +92,10 @@ class TestVectorStoreQuery:
         AC-002-6: cold-start (빈 인덱스) → 명시적 응답.
         silent empty array 반환 금지.
         """
-        from pipelines.mapping.vector_store import IndexNotBootstrappedError, VectorStore  # type: ignore[import]
+        from pipelines.mapping.vector_store import (  # type: ignore[import]
+            IndexNotBootstrappedError,
+            VectorStore,
+        )
 
         query_vec = [0.1] * 768
         store = VectorStore(conn=mock_pgvector_conn_empty)
@@ -136,7 +138,10 @@ class TestVectorStoreIndexStatus:
 
         AC-002-4: stale 또는 partial 결과를 반환하지 않는다.
         """
-        from pipelines.mapping.vector_store import IndexRebuildingError, VectorStore  # type: ignore[import]
+        from pipelines.mapping.vector_store import (  # type: ignore[import]
+            IndexRebuildingError,
+            VectorStore,
+        )
 
         query_vec = [0.1] * 768
         store = VectorStore(conn=mock_pgvector_conn_rebuilding)
@@ -167,7 +172,10 @@ class TestVectorStoreIntegration:
 
     def test_empty_index_raises_on_query(self, pg_connection: object) -> None:  # noqa: ARG002
         """빈 pgvector 인덱스에서 query 시 IndexNotBootstrappedError가 발생해야 한다."""
-        from pipelines.mapping.vector_store import IndexNotBootstrappedError, VectorStore  # type: ignore[import]
+        from pipelines.mapping.vector_store import (  # type: ignore[import]
+            IndexNotBootstrappedError,
+            VectorStore,
+        )
 
         store = VectorStore(conn=pg_connection)
         # 빈 인덱스 상태 (upsert 없음)

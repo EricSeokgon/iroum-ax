@@ -14,8 +14,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-from pkg.models.criterion import Criterion, CriterionMatch
+from pkg.models.criterion import Criterion
 
 
 class TestCriterionMappingPipelineFlow:
@@ -23,7 +22,7 @@ class TestCriterionMappingPipelineFlow:
 
     def test_parse_then_embed_then_upsert_flow(
         self,
-        tmp_path: "Path",  # noqa: F821
+        tmp_path: Path,  # noqa: F821
         mock_ko_sroberta_global: MagicMock,
         mock_pgvector_conn: MagicMock,
     ) -> None:
@@ -61,7 +60,7 @@ class TestCriterionMappingPipelineFlow:
 
     def test_parse_embed_upsert_then_query_returns_results(
         self,
-        tmp_path: "Path",  # noqa: F821
+        tmp_path: Path,  # noqa: F821
         mock_ko_sroberta_global: MagicMock,
         mock_pgvector_conn_with_results: MagicMock,
     ) -> None:
@@ -69,7 +68,6 @@ class TestCriterionMappingPipelineFlow:
 
         AC-002-1: 검색 쿼리 실행 후 top-k 결과 반환.
         """
-        from pipelines.mapping.criterion_parser import CriterionParser  # type: ignore[import]
         from pipelines.mapping.embedding_service import EmbeddingService  # type: ignore[import]
         from pipelines.mapping.retriever import Retriever  # type: ignore[import]
         from pipelines.mapping.vector_store import VectorStore  # type: ignore[import]
@@ -93,7 +91,7 @@ class TestCriterionMappingPipelineFlow:
 
     def test_hanja_in_criterion_does_not_break_pipeline(
         self,
-        tmp_path: "Path",  # noqa: F821
+        tmp_path: Path,  # noqa: F821
         mock_ko_sroberta_global: MagicMock,
         mock_pgvector_conn: MagicMock,
     ) -> None:
@@ -101,7 +99,6 @@ class TestCriterionMappingPipelineFlow:
 
         AC-002-5: 전체 파이프라인 수준의 한자 graceful degradation.
         """
-        from pipelines.mapping.criterion_parser import CriterionParser  # type: ignore[import]
         from pipelines.mapping.embedding_service import EmbeddingService  # type: ignore[import]
         from pipelines.mapping.vector_store import VectorStore  # type: ignore[import]
 

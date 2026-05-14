@@ -189,10 +189,7 @@ class FakeVectorStore:
         for item in self._data:
             emb: list[float] = item["embedding"]
             e_norm = _norm(emb)
-            if q_norm == 0.0 or e_norm == 0.0:
-                cosine = 0.0
-            else:
-                cosine = _dot(query_vector, emb) / (q_norm * e_norm)
+            cosine = 0.0 if q_norm == 0.0 or e_norm == 0.0 else _dot(query_vector, emb) / (q_norm * e_norm)
             distance = 1.0 - cosine
             confidence = max(0.0, cosine)
             results.append(

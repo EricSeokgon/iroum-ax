@@ -11,10 +11,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from pkg.models.criterion import CriterionMatch
 from pkg.models.recommendation import ContentSuggestion, GapItem
-
 
 # ============================================================
 # 공통 픽스처

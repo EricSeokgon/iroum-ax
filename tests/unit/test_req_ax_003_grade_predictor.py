@@ -24,7 +24,6 @@ import pytest
 from pipelines.scoring.grade_predictor import GradePredictor  # type: ignore[import]
 from pkg.models.simulation import BenchmarkReport, GradeDistribution
 
-
 # ============================================================
 # AC-003-1: Happy Path — 정상 예측 (확률 분포 + sum 불변식)
 # ============================================================
@@ -92,10 +91,10 @@ class TestGradePredictorHappyPath:
         """100건 배치에서 확률 합 불변식 위반이 0건이어야 한다 (strategy.md §3.4 pass condition)."""
         violations = 0
         test_texts = [
-            "안전교육 이수율 {pct}% 달성 안전보건 관리 실시".format(pct=pct)
+            f"안전교육 이수율 {pct}% 달성 안전보건 관리 실시"
             for pct in range(70, 101)
         ] + [
-            "안전사고 {n}건 발생 안전관리 미흡".format(n=n)
+            f"안전사고 {n}건 발생 안전관리 미흡"
             for n in range(0, 30)
         ]
         for text in test_texts:

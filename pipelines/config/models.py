@@ -5,13 +5,13 @@ API 요청/응답 스키마 정의.
 """
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 
-class FileType(str, Enum):
+class FileType(StrEnum):
     """문서 파일 형식"""
 
     HWP = "HWP"
@@ -19,7 +19,7 @@ class FileType(str, Enum):
     IMAGE = "IMAGE"
 
 
-class WorkflowStatus(str, Enum):
+class WorkflowStatus(StrEnum):
     """워크플로우 실행 상태"""
 
     PENDING = "PENDING"
@@ -28,7 +28,7 @@ class WorkflowStatus(str, Enum):
     FAILED = "FAILED"
 
 
-class Grade(str, Enum):
+class Grade(StrEnum):
     """경영평가 등급"""
 
     A = "A"

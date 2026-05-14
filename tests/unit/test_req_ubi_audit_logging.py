@@ -9,12 +9,11 @@ with user_id, action, resource_id, and timestamp.
 """
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import MagicMock, patch
 import uuid
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # =============================================================================
 # 테스트 픽스처

@@ -8,15 +8,11 @@ AC-005-3: criterion_id로 평가기준 역추적 가능
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
-
 from pkg.models.criterion import Criterion
 from pkg.models.document import ParsedDocument
 from pkg.models.recommendation import GapItem
 from pkg.models.simulation import BenchmarkReport, GradeDistribution
-
 
 # ============================================================
 # 공통 픽스처

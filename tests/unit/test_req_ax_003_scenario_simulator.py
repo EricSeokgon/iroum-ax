@@ -17,7 +17,7 @@ import pytest
 
 # 구현 전 import — RED phase에서 ModuleNotFoundError 예상
 from pipelines.scoring.scenario_simulator import ScenarioSimulator  # type: ignore[import]
-from pkg.models.simulation import BenchmarkReport, GradeDistribution, ScenarioResult
+from pkg.models.simulation import GradeDistribution, ScenarioResult
 
 
 class TestScenarioSimulatorBtoA:

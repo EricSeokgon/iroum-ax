@@ -11,12 +11,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from pkg.models.criterion import Criterion, CriterionMatch
 from pkg.models.document import ParsedDocument
 from pkg.models.recommendation import RankedSuggestion
 from pkg.models.simulation import BenchmarkReport, GradeDistribution
-
 
 # ============================================================
 # 픽스처

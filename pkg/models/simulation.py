@@ -44,17 +44,19 @@ class GradeDistribution(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_probability_sum(self) -> "GradeDistribution":
+    def validate_probability_sum(self) -> GradeDistribution:
         """확률 합 불변식: p_a + p_b + p_abstain = 1.0 ± 0.001 (REQ-AX-003-E1)"""
         total = self.p_a + self.p_b + self.p_abstain
         if abs(total - 1.0) > 0.001:
             raise ValueError(
-                f"확률 합 불변식 위반: p_a({self.p_a}) + p_b({self.p_b}) + p_abstain({self.p_abstain}) = {total:.4f} ≠ 1.0 ± 0.001"
+                "확률 합 불변식 위반: "
+                f"p_a({self.p_a}) + p_b({self.p_b}) + p_abstain({self.p_abstain}) "
+                f"= {total:.4f} ≠ 1.0 ± 0.001"
             )
         return self
 
     @model_validator(mode="after")
-    def validate_abstain_consistency(self) -> "GradeDistribution":
+    def validate_abstain_consistency(self) -> GradeDistribution:
         """abstain 분기 일관성:
         - max(p_a, p_b) < 0.5 이면 predicted_class는 'abstain'이어야 함
         - max(p_a, p_b) >= 0.5 이면 predicted_class는 'A' 또는 'B'여야 함

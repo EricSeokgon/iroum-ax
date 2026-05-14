@@ -12,10 +12,9 @@ AC-001-4: OCR 동시 요청 큐잉 동작 검증 (Celery 큐 or HTTP 409)
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # =============================================================================
 # 픽스처

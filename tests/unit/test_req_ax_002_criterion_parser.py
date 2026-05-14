@@ -9,14 +9,13 @@ CriterionParser의 계약을 정의한다.
 from __future__ import annotations
 
 import pytest
-
 from pkg.models.criterion import Criterion
 
 
 class TestCriterionParserHappyPath:
     """AC-002-1, AC-002-3: 정상 파싱 경로"""
 
-    def test_parse_returns_list_of_criterion_objects(self, tmp_path: "Path") -> None:  # noqa: F821
+    def test_parse_returns_list_of_criterion_objects(self, tmp_path: Path) -> None:  # noqa: F821
         """parse()가 Criterion 객체 리스트를 반환해야 한다."""
         from pipelines.mapping.criterion_parser import CriterionParser  # type: ignore[import]
 
@@ -30,7 +29,7 @@ class TestCriterionParserHappyPath:
         assert len(result) > 0
         assert all(isinstance(c, Criterion) for c in result)
 
-    def test_parse_preserves_criterion_name_field(self, tmp_path: "Path") -> None:  # noqa: F821
+    def test_parse_preserves_criterion_name_field(self, tmp_path: Path) -> None:  # noqa: F821
         """파싱 결과의 criterion_name 필드가 비어 있지 않아야 한다.
 
         AC-002-3: 항목→지표→배점 계층 정보가 응답에 포함되어야 함.
@@ -46,7 +45,7 @@ class TestCriterionParserHappyPath:
         assert all(c.criterion_name != "" for c in result)
 
     def test_parse_preserves_hierarchy_parent_criterion_id(
-        self, tmp_path: "Path"  # noqa: F821
+        self, tmp_path: Path  # noqa: F821
     ) -> None:
         """계층 구조 보존: 하위 지표에 parent_criterion_id가 연결되어야 한다.
 
@@ -66,7 +65,7 @@ class TestCriterionParserHappyPath:
         assert len(leaf_criteria) > 0, "계층 구조의 하위 지표(leaf)가 최소 1개 이상이어야 함"
 
     def test_parse_extracts_max_points_for_leaf_criteria(
-        self, tmp_path: "Path"  # noqa: F821
+        self, tmp_path: Path  # noqa: F821
     ) -> None:
         """leaf criterion의 max_points 필드가 추출되어야 한다.
 
@@ -88,7 +87,7 @@ class TestCriterionParserHappyPath:
 class TestCriterionParserHanjaHandling:
     """AC-002-3, AC-002-5: 한자/한글 혼용 처리"""
 
-    def test_parse_handles_hanja_text_without_crash(self, tmp_path: "Path") -> None:  # noqa: F821
+    def test_parse_handles_hanja_text_without_crash(self, tmp_path: Path) -> None:  # noqa: F821
         """한자가 포함된 텍스트를 파싱할 때 크래시가 발생하지 않아야 한다.
 
         AC-002-5: 시스템 크래시·HTTP 500 발생 시 본 AC는 실패.
@@ -101,12 +100,12 @@ class TestCriterionParserHanjaHandling:
         parser = CriterionParser()
         # 한자 파싱 중 예외가 발생하면 안 됨
         try:
-            result = parser.parse(str(dummy_pdf))
+            parser.parse(str(dummy_pdf))
         except Exception as e:
             pytest.fail(f"한자 포함 PDF 파싱 시 예외 발생: {e}")
 
     def test_parse_attaches_normalization_warning_for_unresolved_hanja(
-        self, mock_criterion_with_hanja: "Criterion"  # noqa: F821
+        self, mock_criterion_with_hanja: Criterion  # noqa: F821
     ) -> None:
         """미등록 한자 토큰에 대해 normalization_warning 메타데이터가 첨부되어야 한다.
 
@@ -123,7 +122,7 @@ class TestCriterionParserHanjaHandling:
         assert "unresolved_chars" in processed.normalization_warning
 
     def test_parse_preserves_raw_text_when_hanja_unresolved(
-        self, mock_criterion_with_hanja: "Criterion"  # noqa: F821
+        self, mock_criterion_with_hanja: Criterion  # noqa: F821
     ) -> None:
         """한자 정규화 실패 시 raw 텍스트가 보존되어 임베딩에 전달되어야 한다.
 
