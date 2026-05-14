@@ -1,0 +1,39 @@
+// simulation.proto — 등급 시뮬레이션 메시지 정의
+// Sprint 0 스켈레톤 (메시지 필드만, 서비스 정의 없음)
+syntax = "proto3";
+
+package iroum.ax.v1;
+
+option go_package = "github.com/ircp/iroum-ax/internal/proto/ax/v1;axv1";
+
+// Grade 경영평가 등급
+enum Grade {
+  GRADE_UNSPECIFIED = 0;
+  GRADE_A = 1;
+  GRADE_B = 2;
+  GRADE_C = 3;
+  GRADE_D = 4;
+}
+
+// SimulationStatus 시뮬레이션 실행 상태
+enum SimulationStatus {
+  SIMULATION_STATUS_UNSPECIFIED = 0;
+  SIMULATION_STATUS_PENDING = 1;
+  SIMULATION_STATUS_COMPLETED = 2;
+  SIMULATION_STATUS_FAILED = 3;
+}
+
+// Simulation 등급 시뮬레이션 결과
+// abstain_flag: 두 등급 확률 모두 0.5 미만인 경우 기권 (REQ-AX-003-E1)
+// TODO(Sprint 4): 실제 필드 확정 후 보완 (REQ-AX-003)
+message Simulation {
+  string id = 1;                    // UUID
+  string workflow_id = 2;           // 워크플로우 ID
+  Grade current_grade = 3;          // 현재 등급 (자사 보고서 예측)
+  Grade target_grade = 4;           // 목표 등급
+  float probability_a = 5;          // A 등급 확률 [0, 1]
+  float probability_b = 6;          // B 등급 확률 [0, 1]
+  bool abstain_flag = 7;            // 두 확률 모두 0.5 미만 시 기권
+  SimulationStatus status = 8;      // 실행 상태
+  string prediction = 9;            // 최종 예측 등급 (기권 시 빈 문자열)
+}

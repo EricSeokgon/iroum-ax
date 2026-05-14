@@ -1,0 +1,66 @@
+# iroum-ax Helm Chart 기본값
+# Sprint 0 스켈레톤 — 프로덕션 values는 Exclusion §13으로 별도 SPEC에서 정의
+
+# --- 공통 이미지 설정 ---
+image:
+  repository: ghcr.io/ircp/iroum-ax
+  tag: "0.1.0-spec-ax-001"
+  pullPolicy: IfNotPresent
+
+# --- 복제본 수 ---
+replicaCount: 1
+
+# --- 오토스케일링 (Sprint 0: 비활성) ---
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+
+# --- GPU (결정 #4: 미사용) ---
+gpu:
+  enabled: false
+
+# --- PostgreSQL (외부 또는 차트 내 설치) ---
+postgresql:
+  image: pgvector/pgvector:pg16
+  port: 5432
+  database: iroum_ax
+  username: ax
+  # password: 실제 비밀번호는 sealed-secret으로 관리
+
+# --- Redis ---
+redis:
+  image: redis:7-alpine
+  port: 6379
+
+# --- Control Plane 설정 ---
+controlPlane:
+  grpcPort: 50051
+  restPort: 8080
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+# --- Pipelines (FastAPI) 설정 ---
+pipelines:
+  port: 8000
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+
+# --- 서비스 ---
+service:
+  type: ClusterIP
+
+# --- Ingress ---
+ingress:
+  enabled: false

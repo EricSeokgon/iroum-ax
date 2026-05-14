@@ -1,0 +1,136 @@
+# iroum-ax 로컬 개발 환경 (docker-compose)
+# Sprint 0 스켈레톤 — 프로덕션 K8s 배포는 Exclusion §13으로 별도 SPEC에서 진행
+#
+# GPU 서비스 (vLLM):
+#   GPU 없음이 확정되어 기본 프로파일에서 제외.
+#   GPU 환경에서 활성화: docker compose --profile gpu up
+#
+# 기본 서비스 시작: docker compose up -d
+# 전체 서비스 종료: docker compose down
+
+services:
+  # --- PostgreSQL 16 + pgvector 확장 ---
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: iroum-ax-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: iroum_ax
+      POSTGRES_USER: ax
+      POSTGRES_PASSWORD: devpass
+    volumes:
+      # 초기 스키마 자동 적용 (docker-entrypoint-initdb.d)
+      - ./.moai/db/schema/initial.sql:/docker-entrypoint-initdb.d/01_initial.sql:ro
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ax -d iroum_ax"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Redis 7 (Celery 브로커 + 캐시) ---
+  redis:
+    image: redis:7-alpine
+    container_name: iroum-ax-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # --- Python Pipelines (FastAPI + Celery) ---
+  # Sprint 0에서는 빌드만 정의, 실제 실행은 Sprint 2+ 이후
+  pipelines:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: iroum-ax-pipelines
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=ax
+      - POSTGRES_PASSWORD=devpass
+      - POSTGRES_DB=iroum_ax
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Sprint 0에서는 컨테이너 시작만, 실제 서비스는 비활성
+    profiles: ["app"]
+
+  # --- Go Control Plane (gRPC:50051 + REST:8080) ---
+  control-plane:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: iroum-ax-control-plane
+    entrypoint: ["/usr/local/bin/control-plane"]
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles: ["app"]
+
+  # --- vLLM: Qwen2-VL (GPU opt-in 전용) ---
+  # GPU 없음 결정 (Sprint 0 사용자 결정 #4)
+  # GPU 환경에서 활성화: docker compose --profile gpu up vllm-qwen2vl
+  vllm-qwen2vl:
+    image: vllm/vllm-openai:latest
+    container_name: iroum-ax-vllm-qwen2vl
+    ports:
+      - "8100:8000"
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+    command: ["--model", "Qwen/Qwen2-VL-7B-Instruct", "--served-model-name", "qwen2vl"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles: ["gpu"]
+
+  # --- vLLM: Qwen 2.5 (GPU opt-in 전용) ---
+  vllm-qwen25:
+    image: vllm/vllm-openai:latest
+    container_name: iroum-ax-vllm-qwen25
+    ports:
+      - "8101:8000"
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+    command: ["--model", "Qwen/Qwen2.5-7B-Instruct", "--served-model-name", "qwen25"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles: ["gpu"]
+
+volumes:
+  postgres-data:
+  redis-data:

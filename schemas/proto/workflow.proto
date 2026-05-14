@@ -1,0 +1,28 @@
+// workflow.proto — 워크플로우 상태머신 메시지 정의
+// Sprint 0 스켈레톤 (메시지 필드만, 서비스 정의 없음)
+syntax = "proto3";
+
+package iroum.ax.v1;
+
+option go_package = "github.com/ircp/iroum-ax/internal/proto/ax/v1;axv1";
+
+// WorkflowStatus 워크플로우 실행 상태
+// Go control-plane internal/workflow/state_machine.go와 동기화 유지
+enum WorkflowStatus {
+  WORKFLOW_STATUS_UNSPECIFIED = 0;
+  WORKFLOW_STATUS_PENDING = 1;
+  WORKFLOW_STATUS_RUNNING = 2;
+  WORKFLOW_STATUS_COMPLETED = 3;
+  WORKFLOW_STATUS_FAILED = 4;
+}
+
+// Workflow E2E 실행 워크플로우 엔티티
+// TODO(Sprint 7): 실제 RPC 서비스 정의 추가 (REQ-AX-001~005 통합)
+message Workflow {
+  string id = 1;            // UUID
+  string user_id = 2;       // 사용자 ID (기본: "cli-anonymous")
+  WorkflowStatus status = 3; // 현재 상태
+  string document_id = 4;   // 연결된 문서 ID
+  string report_id = 5;     // 생성된 보고서 ID (완료 후 채워짐)
+  bytes result_json = 6;    // 최종 결과 (JSON 직렬화)
+}

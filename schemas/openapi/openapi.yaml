@@ -1,0 +1,131 @@
+openapi: "3.1.0"
+info:
+  title: iroum-ax Pipelines API
+  version: "0.1.0"
+  description: |
+    한국 공공기관 경영평가 AI 파이프라인 REST API.
+    Sprint 0 스켈레톤 — /health만 활성, 나머지 엔드포인트는 Sprint 2-6에서 구현.
+  contact:
+    email: admin@ircp.co.kr
+
+servers:
+  - url: http://localhost:8000
+    description: 로컬 개발 서버 (docker-compose)
+
+tags:
+  - name: system
+    description: 시스템 상태 확인
+  - name: documents
+    description: 문서 수집 (REQ-AX-001, Sprint 2)
+  - name: criteria
+    description: 평가기준 매핑 (REQ-AX-002, Sprint 3)
+  - name: simulations
+    description: 등급 시뮬레이션 (REQ-AX-003, Sprint 4)
+  - name: reports
+    description: 보고서 초안 생성 (REQ-AX-004, Sprint 5)
+  - name: recommendations
+    description: Gap 추천 (REQ-AX-005, Sprint 6)
+
+paths:
+  /health:
+    get:
+      summary: 서비스 상태 확인
+      tags: [system]
+      operationId: healthCheck
+      responses:
+        "200":
+          description: 서비스 정상
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/documents/upload:
+    post:
+      summary: HWP/PDF 문서 업로드 및 파싱 (REQ-AX-001)
+      tags: [documents]
+      operationId: uploadDocument
+      x-sprint: "Sprint 2 — REQ-AX-001"
+      responses:
+        "501":
+          description: Not Implemented (Sprint 2에서 구현 예정)
+
+  /api/criteria/index:
+    post:
+      summary: 평가기준 벡터 인덱싱 (REQ-AX-002)
+      tags: [criteria]
+      operationId: indexCriteria
+      x-sprint: "Sprint 3 — REQ-AX-002"
+      responses:
+        "501":
+          description: Not Implemented (Sprint 3에서 구현 예정)
+
+  /api/criteria/search:
+    get:
+      summary: 평가기준 유사도 검색 (REQ-AX-002)
+      tags: [criteria]
+      operationId: searchCriteria
+      x-sprint: "Sprint 3 — REQ-AX-002"
+      responses:
+        "501":
+          description: Not Implemented (Sprint 3에서 구현 예정)
+
+  /api/simulations/predict:
+    post:
+      summary: 등급 확률 예측 (REQ-AX-003)
+      tags: [simulations]
+      operationId: predictGrade
+      x-sprint: "Sprint 4 — REQ-AX-003"
+      responses:
+        "501":
+          description: Not Implemented (Sprint 4에서 구현 예정)
+
+  /api/reports/generate:
+    post:
+      summary: 보고서 초안 생성 (REQ-AX-004)
+      tags: [reports]
+      operationId: generateReport
+      x-sprint: "Sprint 5 — REQ-AX-004"
+      responses:
+        "501":
+          description: Not Implemented (Sprint 5에서 구현 예정)
+
+  /api/recommendations/generate:
+    post:
+      summary: Gap 개선 추천 생성 (REQ-AX-005)
+      tags: [recommendations]
+      operationId: generateRecommendations
+      x-sprint: "Sprint 6 — REQ-AX-005"
+      responses:
+        "501":
+          description: Not Implemented (Sprint 6에서 구현 예정)
+
+  /api/recommendations/{id}/feedback:
+    patch:
+      summary: 추천 항목 피드백 등록 (REQ-AX-005)
+      tags: [recommendations]
+      operationId: submitRecommendationFeedback
+      x-sprint: "Sprint 6 — REQ-AX-005"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "501":
+          description: Not Implemented (Sprint 6에서 구현 예정)
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, version]
+      properties:
+        status:
+          type: string
+          example: "ok"
+        version:
+          type: string
+          example: "0.1.0"

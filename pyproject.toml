@@ -1,0 +1,113 @@
+[tool.poetry]
+name = "iroum-ax"
+version = "0.1.0"
+description = "iroum-ax: 한국 공공기관 경영평가 AI 플랫폼 (Python Pipelines)"
+authors = ["ircp <admin@ircp.co.kr>"]
+readme = "README.md"
+packages = [
+    { include = "pipelines" },
+    { include = "pkg" },
+]
+
+[tool.poetry.dependencies]
+# Python 버전
+python = "^3.11"
+
+# --- API 레이어 ---
+fastapi = "^0.110.0"
+uvicorn = { version = "^0.29.0", extras = ["standard"] }
+pydantic = "^2.6.0"
+pydantic-settings = "^2.2.0"
+
+# --- 데이터베이스 ---
+sqlalchemy = "^2.0.0"
+asyncpg = "^0.29.0"        # async PostgreSQL 드라이버
+psycopg2-binary = "^2.9.9" # 동기 PostgreSQL 드라이버 (Celery 호환)
+pgvector = "^0.2.5"        # pgvector Python 바인딩
+
+# --- 비동기 태스크 큐 ---
+celery = { version = "^5.3.6", extras = ["redis"] }
+redis = "^5.0.4"
+
+# --- ML / 임베딩 ---
+# torch CPU-only: GPU가 없는 환경에서는 +cpu 빌드 사용.
+# GPU 환경에서는 환경 변수 TORCH_CUDA_ARCH_LIST 설정 후 별도 설치 필요.
+# torch==2.2.2+cpu (CPU 전용) — poetry에서는 source를 지정해야 함.
+# 실제 설치: pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch = { version = "^2.2.0", source = "torch-cpu" }
+transformers = "^4.40.0"
+sentence-transformers = "^2.7.0"    # ko-sroberta-multitask 로딩에 사용
+scikit-learn = "^1.4.0"
+joblib = "^1.4.0"
+
+# --- HWP / PDF 파싱 ---
+pyhwp = "^0.1b15"           # HWP OLE 파싱 (hwp-converter 대안)
+pypdf = "^4.0.0"
+pdfplumber = "^0.11.0"
+hanja = "^0.13.5"            # 한자 → 한글 변환 (REQ-AX-002 정규화)
+
+# --- 유틸리티 ---
+httpx = "^0.27.0"            # 비동기 HTTP 클라이언트 (테스트 + LLM API 호출)
+python-multipart = "^0.0.9"  # 파일 업로드
+
+[tool.poetry.group.dev.dependencies]
+# --- 테스트 ---
+pytest = "^8.0.0"
+pytest-asyncio = "^0.23.0"
+pytest-cov = "^4.1.0"
+testcontainers = { version = "^4.5.0", extras = ["postgres", "redis"] }
+
+# --- 린트 / 타입 체크 ---
+ruff = "^0.4.0"
+mypy = "^1.10.0"
+types-redis = "^4.6.0"
+
+[[tool.poetry.source]]
+name = "torch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"
+
+[[tool.poetry.source]]
+name = "PyPI"
+priority = "primary"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+# --- Ruff 설정 ---
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["pipelines", "pkg", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "ANN", "B", "SIM"]
+ignore = [
+    "ANN101",  # self 타입 어노테이션 불필요
+    "ANN102",  # cls 타입 어노테이션 불필요
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["ANN"]   # 테스트 파일 타입 어노테이션 면제
+
+# --- Mypy 설정 ---
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+# --- Pytest 설정 ---
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests", "pipelines"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "gpu: GPU 필요 테스트 (pytest -m gpu로 opt-in 실행)",
+    "integration: 통합 테스트 (testcontainers 사용)",
+    "unit: 단위 테스트 (외부 의존성 없음)",
+]
+addopts = "--tb=short -q"

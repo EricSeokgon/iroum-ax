@@ -1,0 +1,36 @@
+// document.proto — 문서 메시지 정의
+// Sprint 0 스켈레톤 (메시지 필드만, 서비스 정의 없음)
+syntax = "proto3";
+
+package iroum.ax.v1;
+
+option go_package = "github.com/ircp/iroum-ax/internal/proto/ax/v1;axv1";
+
+// FileType 문서 파일 형식
+enum FileType {
+  FILE_TYPE_UNSPECIFIED = 0;
+  FILE_TYPE_HWP = 1;
+  FILE_TYPE_PDF = 2;
+  FILE_TYPE_IMAGE = 3;
+}
+
+// ParseStatus 문서 파싱 상태
+enum ParseStatus {
+  PARSE_STATUS_UNSPECIFIED = 0;
+  PARSE_STATUS_PENDING = 1;
+  PARSE_STATUS_COMPLETED = 2;
+  PARSE_STATUS_FAILED = 3;
+}
+
+// Document 파싱된 문서 메시지
+// TODO(Sprint 2): 실제 필드 확정 후 보완 (REQ-AX-001)
+message Document {
+  string id = 1;              // UUID
+  string filename = 2;        // 원본 파일명
+  FileType file_type = 3;     // 파일 형식
+  string parsed_text = 4;     // 파싱된 텍스트
+  string language = 5;        // 언어 코드 (기본: "ko")
+  string parse_quality_flag = 6; // 파싱 품질 경고 (예: "LOW_OCR_CONFIDENCE")
+  ParseStatus status = 7;     // 파싱 상태
+  bytes metadata = 8;         // JSON 메타데이터 (직렬화)
+}

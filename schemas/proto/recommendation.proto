@@ -1,0 +1,29 @@
+// recommendation.proto — Gap 추천 메시지 정의
+// Sprint 0 스켈레톤 (메시지 필드만, 서비스 정의 없음)
+syntax = "proto3";
+
+package iroum.ax.v1;
+
+option go_package = "github.com/ircp/iroum-ax/internal/proto/ax/v1;axv1";
+
+// RecommendationStatus 추천 항목 상태
+enum RecommendationStatus {
+  RECOMMENDATION_STATUS_UNSPECIFIED = 0;
+  RECOMMENDATION_STATUS_ACTIVE = 1;
+  RECOMMENDATION_STATUS_ACCEPTED = 2;
+  RECOMMENDATION_STATUS_REJECTED = 3;
+}
+
+// Recommendation Gap 분석 기반 개선 추천 항목
+// TODO(Sprint 6): 실제 필드 확정 후 보완 (REQ-AX-005)
+message Recommendation {
+  string id = 1;                     // UUID
+  string workflow_id = 2;            // 워크플로우 ID
+  string content = 3;                // 추천 내용 (한국어)
+  int32 expected_score_delta = 4;    // 예상 점수 향상치
+  float feasibility_score = 5;       // 실현 가능성 점수 [0, 1]
+  string source_benchmark_id = 6;    // 참조 벤치마크 보고서 ID
+  RecommendationStatus status = 7;   // 상태
+  bytes feedback = 8;                // 사용자 피드백 (JSON 직렬화)
+  int32 priority = 9;                // 우선순위 (낮을수록 높은 우선순위)
+}

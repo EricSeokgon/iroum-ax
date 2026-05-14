@@ -1,0 +1,19 @@
+apiVersion: v2
+name: iroum-ax
+description: |
+  iroum-ax — 한국 공공기관 경영평가 AI 플랫폼
+  Sprint 0 Helm Chart 스켈레톤 (Control Plane + Pipelines)
+type: application
+version: 0.1.0
+appVersion: "0.1.0-spec-ax-001"
+keywords:
+  - ai
+  - evaluation
+  - rag
+  - korean
+home: https://github.com/ircp/iroum-ax
+sources:
+  - https://github.com/ircp/iroum-ax
+maintainers:
+  - name: ircp
+    email: admin@ircp.co.kr

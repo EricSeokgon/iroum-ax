@@ -1,0 +1,20 @@
+// criterion.proto — 평가기준 메시지 정의
+// Sprint 0 스켈레톤 (메시지 필드만, 서비스 정의 없음)
+syntax = "proto3";
+
+package iroum.ax.v1;
+
+option go_package = "github.com/ircp/iroum-ax/internal/proto/ax/v1;axv1";
+
+// Criterion 경영평가 평가기준 항목
+// 임베딩 벡터는 SQL VECTOR(768)에 저장 (ko-sroberta-multitask 차원)
+// TODO(Sprint 3): 실제 필드 확정 후 보완 (REQ-AX-002)
+message Criterion {
+  string id = 1;                    // UUID
+  string criterion_name = 2;        // 평가기준 이름 (예: "안전보건")
+  string criterion_detail = 3;      // 상세 설명 (평가편람 원문)
+  int32 max_points = 4;             // 최고 배점
+  string parent_criterion_id = 5;   // 상위 기준 ID (계층 구조)
+  // embedding: SQL VECTOR(768) — proto에서는 bytes로 전달
+  bytes embedding_bytes = 6;        // 임베딩 벡터 (직렬화된 float32 배열)
+}

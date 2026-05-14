@@ -211,3 +211,18 @@ dist-ssr/
 .vercel/
 .netlify/
 .firebase/
+
+# ===========================================
+# iroum-ax 프로젝트 전용 패턴
+# ===========================================
+
+# 테스트 픽스처 — KEPCO E&C 실제 데이터 (절대 커밋 금지)
+tests/fixtures/kepco/*
+!tests/fixtures/kepco/.gitkeep
+
+# ML 모델 캐시 (로컬에만 존재, 대용량)
+.transformers_cache/
+ko-sroberta-cache/
+
+# iroum-ax 바이너리 빌드 아티팩트
+bin/

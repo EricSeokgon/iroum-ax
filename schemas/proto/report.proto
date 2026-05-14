@@ -1,0 +1,20 @@
+// report.proto — 실적보고서 메시지 정의
+// Sprint 0 스켈레톤 (메시지 필드만, 서비스 정의 없음)
+syntax = "proto3";
+
+package iroum.ax.v1;
+
+option go_package = "github.com/ircp/iroum-ax/internal/proto/ax/v1;axv1";
+
+import "simulation.proto"; // Grade enum 공유
+
+// Report 경영평가 실적보고서 (자사 또는 벤치마크)
+// TODO(Sprint 5): 실제 필드 확정 후 보완 (REQ-AX-004)
+message Report {
+  string id = 1;                  // UUID
+  string organization_name = 2;   // 기관명
+  Grade grade = 3;                // 등급 (A/B/C/D)
+  string content = 4;             // 보고서 본문 (생성된 초안 또는 벤치마크 원문)
+  int32 score = 5;                // 점수
+  string source_benchmark_id = 6; // 참조 벤치마크 ID (자사 보고서 = "")
+}

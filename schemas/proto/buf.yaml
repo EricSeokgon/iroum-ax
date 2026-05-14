@@ -1,0 +1,12 @@
+version: v1
+name: buf.build/ircp/iroum-ax
+deps:
+  - buf.build/googleapis/googleapis
+lint:
+  use:
+    - DEFAULT
+  except:
+    - PACKAGE_VERSION_SUFFIX  # 아직 버전 suffix 미적용 단계
+breaking:
+  use:
+    - FILE

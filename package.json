@@ -1,0 +1,22 @@
+{
+  "name": "iroum-ax-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "iroum-ax 모노레포 루트 (TypeScript 툴링만 — Console UI는 SPEC-AX-001 제외 대상)",
+  "workspaces": [
+    "apps/console"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.0",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.5"
+  }
+}
