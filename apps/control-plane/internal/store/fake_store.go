@@ -41,6 +41,17 @@ type FakeStore struct {
 	// NextTxFailOnWorkflow 다음 BeginTx에서 반환하는 FakeTx의 FailOnWorkflowInsert=true 설정
 	// 트랜잭션 원자성 Scenario B 테스트용 (AC-CTRL-UBI-001)
 	NextTxFailOnWorkflow bool
+	// NextTxFailOnGetWorkflow 다음 BeginTx에서 반환하는 FakeTx의 FailOnGetWorkflow=true 설정
+	NextTxFailOnGetWorkflow bool
+}
+
+// SeedWorkflow 테스트 사전 조건으로 워크플로우를 영속 저장소에 직접 삽입
+// BeginTx + InsertWorkflow + Commit 없이 초기 상태를 설정할 때 사용
+func (s *FakeStore) SeedWorkflow(w *types.Workflow) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	wfCopy := *w
+	s.Workflows[wfCopy.ID.String()] = &wfCopy
 }
 
 // NewFakeStore FakeStore 인스턴스를 초기화하여 반환
@@ -61,8 +72,10 @@ func (s *FakeStore) BeginTx(_ context.Context) (WorkflowTx, error) {
 	s.mu.Lock()
 	failAudit := s.NextTxFailOnAudit
 	failWorkflow := s.NextTxFailOnWorkflow
+	failGet := s.NextTxFailOnGetWorkflow
 	s.NextTxFailOnAudit = false
 	s.NextTxFailOnWorkflow = false
+	s.NextTxFailOnGetWorkflow = false
 	s.mu.Unlock()
 
 	tx := &FakeTx{
@@ -72,6 +85,7 @@ func (s *FakeStore) BeginTx(_ context.Context) (WorkflowTx, error) {
 		pendingUpdates:       make(map[string]types.WorkflowState),
 		FailOnAuditInsert:    failAudit,
 		FailOnWorkflowInsert: failWorkflow,
+		FailOnGetWorkflow:    failGet,
 	}
 	return tx, nil
 }
@@ -94,6 +108,8 @@ type FakeTx struct {
 	FailOnWorkflowInsert bool
 	// FailOnUpdateState true이면 UpdateWorkflowState 호출 시 에러 반환 (장애 주입)
 	FailOnUpdateState bool
+	// FailOnGetWorkflow true이면 GetWorkflow 호출 시 에러 반환 (장애 주입)
+	FailOnGetWorkflow bool
 
 	// committed commit 완료 플래그 (rollback 중복 호출 방지)
 	committed bool
@@ -171,3 +187,31 @@ func (tx *FakeTx) Rollback(_ context.Context) error {
 	tx.pendingUpdates = make(map[string]types.WorkflowState)
 	return nil
 }
+
+// GetWorkflow 현재 FakeStore의 영속 저장소에서 워크플로우를 조회
+// Sprint 2 상태 머신이 전이 전 현재 상태를 읽기 위해 사용
+// 실제 pgx 구현에서는 SELECT ... FOR UPDATE로 대체됨 (Sprint 3)
+// 워크플로우가 없으면 errors.ErrWorkflowNotFound를 반환
+func (tx *FakeTx) GetWorkflow(_ context.Context, id string) (*types.Workflow, error) {
+	if tx.FailOnGetWorkflow {
+		return nil, errFakeGetWorkflowFail
+	}
+	// 영속 저장소에서 조회 (뮤텍스 보호)
+	tx.store.mu.Lock()
+	defer tx.store.mu.Unlock()
+
+	wf, ok := tx.store.Workflows[id]
+	if !ok {
+		return nil, errFakeWorkflowNotFound
+	}
+	// 얕은 복사를 반환해 호출자가 직접 수정 못하도록 격리
+	wfCopy := *wf
+	return &wfCopy, nil
+}
+
+// errFakeGetWorkflowFail GetWorkflow 장애 주입 시 반환하는 sentinel 에러
+var errFakeGetWorkflowFail = errors.New("fake: injected get workflow failure")
+
+// errFakeWorkflowNotFound GetWorkflow 호출 시 워크플로우가 없을 때 반환
+// errors.ErrWorkflowNotFound와 구분하기 위해 내부 sentinel 사용 (Sprint 3 pgx에서 교체)
+var errFakeWorkflowNotFound = errors.New("workflow not found")

@@ -34,6 +34,9 @@ type WorkflowTx interface {
 	InsertAuditLog(ctx context.Context, e *audit.Event) error
 	// UpdateWorkflowState 워크플로우 상태를 갱신 (SELECT FOR UPDATE 후 호출)
 	UpdateWorkflowState(ctx context.Context, id string, newState types.WorkflowState) error
+	// GetWorkflow 트랜잭션 내에서 워크플로우 행을 조회 (Sprint 3에서 SELECT FOR UPDATE로 구현)
+	// 워크플로우가 없으면 errors.ErrWorkflowNotFound를 래핑하여 반환
+	GetWorkflow(ctx context.Context, id string) (*types.Workflow, error)
 	// Commit 현재 트랜잭션을 커밋하여 모든 변경사항을 영속화
 	Commit(ctx context.Context) error
 	// Rollback 현재 트랜잭션을 롤백하여 모든 변경사항을 취소
