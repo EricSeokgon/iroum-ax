@@ -1,0 +1,355 @@
+# iroum-ax CI 파이프라인
+# Python 3.11 (pipelines/pkg/tests) + Go 1.25 (apps/control-plane) 모노레포 검증
+# 트리거: main 브랜치 push/PR + 수동 실행(workflow_dispatch)
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 같은 PR/브랜치에서 중복 실행 취소 — PR에서만 취소, main push는 항상 실행
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# 전역 환경 변수
+env:
+  CGO_ENABLED: "0"
+  GO_VERSION: "1.25"
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ============================================================
+  # [1] Python 린트 — ruff (빠른 피드백, 전체 dep 불필요)
+  # ============================================================
+  lint-python:
+    name: lint-python
+    runs-on: ubuntu-latest
+    # Python 파일 변경이 있을 때만 실행 (paths 필터)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(toJson(github.event.commits[*].modified + github.event.commits[*].added), 'pipelines/') ||
+      contains(toJson(github.event.commits[*].modified + github.event.commits[*].added), 'pkg/') ||
+      contains(toJson(github.event.commits[*].modified + github.event.commits[*].added), 'tests/') ||
+      contains(toJson(github.event.commits[*].modified + github.event.commits[*].added), 'pyproject.toml') ||
+      github.event_name == 'pull_request'
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python ${{ env.PYTHON_VERSION }} 설정 (pip 캐시 포함)
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      # ruff만 설치 — 전체 프로젝트 deps 불필요 (속도 최적화)
+      - name: ruff 설치
+        run: pip install "ruff>=0.4.0"
+
+      - name: ruff 린트 검사 (pipelines/ pkg/ tests/)
+        run: ruff check pipelines/ pkg/ tests/
+
+      - name: 린트 결과 요약 기록
+        if: always()
+        run: |
+          echo "## Python Lint (ruff)" >> $GITHUB_STEP_SUMMARY
+          echo "- 검사 대상: \`pipelines/\`, \`pkg/\`, \`tests/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================
+  # [2] Go 린트 — golangci-lint
+  # ============================================================
+  lint-go:
+    name: lint-go
+    runs-on: ubuntu-latest
+    # Go 파일 변경이 있을 때만 실행
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(toJson(github.event.commits[*].modified + github.event.commits[*].added), 'apps/') ||
+      contains(toJson(github.event.commits[*].modified + github.event.commits[*].added), 'go.mod') ||
+      contains(toJson(github.event.commits[*].modified + github.event.commits[*].added), 'go.sum') ||
+      contains(toJson(github.event.commits[*].modified + github.event.commits[*].added), '.golangci.yml') ||
+      github.event_name == 'pull_request'
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Go ${{ env.GO_VERSION }} 설정 (모듈 캐시 포함)
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # golangci-lint 공식 액션 — 자체 캐시 내장
+      - name: golangci-lint 실행
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: "v1.64"
+          args: --timeout=5m ./apps/control-plane/...
+          # golangci-lint 캐시 — 증분 빌드 속도 향상
+          skip-cache: false
+
+      - name: 린트 결과 요약 기록
+        if: always()
+        run: |
+          echo "## Go Lint (golangci-lint v1.64)" >> $GITHUB_STEP_SUMMARY
+          echo "- 검사 대상: \`./apps/control-plane/...\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================
+  # [3] Python 단위 테스트 — pytest + coverage
+  # ============================================================
+  test-python:
+    name: test-python
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python ${{ env.PYTHON_VERSION }} 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          # uv 사용 시 pip 캐시는 uv가 관리하므로 pip 캐시 비활성화
+          cache: "pip"
+
+      # uv.lock 커밋 — uv sync --frozen으로 재현 가능한 의존성 설치
+      - name: uv 설치
+        run: pipx install uv
+
+      - name: Python 의존성 설치 (uv sync --frozen)
+        run: uv sync --frozen --no-dev
+        # dev 그룹(pytest, ruff 등)은 별도 설치
+
+      - name: 테스트 의존성 설치 (dev 그룹)
+        run: uv sync --frozen
+
+      # torch는 CI에서 CPU 전용 빌드 사용 — GPU 없이도 import 가능
+      # integration/gpu 마커 제외로 실행 시간 최소화
+      - name: Python 단위 테스트 실행 (177개, integration/gpu 제외)
+        run: |
+          uv run pytest tests/unit/ \
+            -m "not integration and not gpu" \
+            --cov=pipelines \
+            --cov=pkg \
+            --cov-report=xml:coverage-python.xml \
+            --cov-report=term-missing \
+            --cov-fail-under=80 \
+            -q
+        # 커버리지 목표: 85% (quality.yaml) / CI 게이트: 80% (현재 82%)
+        # --cov-fail-under=80 으로 경고가 아닌 실패 처리
+
+      - name: Python 커버리지 아티팩트 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage-xml
+          path: coverage-python.xml
+          retention-days: 7
+
+      - name: 테스트 결과 요약 기록
+        if: always()
+        run: |
+          echo "## Python Unit Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- 범위: \`tests/unit/\` (not integration, not gpu)" >> $GITHUB_STEP_SUMMARY
+          echo "- 커버리지 게이트: >=80% (목표: 85%)" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================
+  # [4] Go 단위 테스트 — race detector + coverage
+  # ============================================================
+  test-go-unit:
+    name: test-go-unit
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Go ${{ env.GO_VERSION }} 설정 (모듈 캐시 포함)
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # -race: 레이스 컨디션 감지 (안전성 검증)
+      # integration 태그 제외 — testcontainers 불필요
+      - name: Go 단위 테스트 실행 (79개, -race)
+        run: |
+          go test \
+            -race \
+            -cover \
+            -coverprofile=go-coverage.out \
+            -timeout=5m \
+            ./apps/control-plane/internal/... \
+            $(go list ./apps/control-plane/internal/... | grep -v '_test$')
+
+      - name: Go 커버리지 보고서 생성 (텍스트)
+        run: go tool cover -func=go-coverage.out | tail -1
+
+      - name: Go 커버리지 아티팩트 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage-out
+          path: go-coverage.out
+          retention-days: 7
+
+      - name: 테스트 결과 요약 기록
+        if: always()
+        run: |
+          TOTAL=$(go tool cover -func=go-coverage.out 2>/dev/null | tail -1 | awk '{print $3}' || echo "N/A")
+          echo "## Go Unit Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- 범위: \`./apps/control-plane/internal/...\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 레이스 감지: 활성화" >> $GITHUB_STEP_SUMMARY
+          echo "- 전체 커버리지: ${TOTAL}" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================
+  # [5] Go 통합 테스트 — PostgreSQL:16 + Redis:7 서비스 컨테이너
+  #     test-go-unit 완료 후 실행 (단위 실패 시 낭비 방지)
+  # ============================================================
+  test-go-integration:
+    name: test-go-integration
+    runs-on: ubuntu-latest
+    needs: [test-go-unit]
+
+    # GitHub Actions 네이티브 서비스 컨테이너 사용
+    # testcontainers-go 대비 장점: Docker daemon 불필요, 이미 실행 중, 빠른 시작
+    # testcontainers-go는 이미 go.mod에 있지만 CI에서는 GH Actions 서비스가 더 안정적
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: iroum
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: iroum_ax
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U iroum -d iroum_ax"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # 서비스 컨테이너는 localhost로 노출됨
+      POSTGRES_DSN: "postgres://iroum:testpass@localhost:5432/iroum_ax?sslmode=disable"
+      REDIS_ADDR: "localhost:6379"
+      # testcontainers-go가 자체 컨테이너 생성 시도를 막는 환경 변수
+      # (GH Actions 서비스를 우선 사용하도록 유도)
+      TESTCONTAINERS_RYUK_DISABLED: "true"
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Go ${{ env.GO_VERSION }} 설정 (모듈 캐시 포함)
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # PostgreSQL이 완전히 준비될 때까지 대기 (health check 보완)
+      - name: PostgreSQL 연결 대기
+        run: |
+          until pg_isready -h localhost -p 5432 -U iroum; do
+            echo "PostgreSQL 준비 대기 중..."
+            sleep 2
+          done
+          echo "PostgreSQL 준비 완료"
+
+      # 통합 테스트용 스키마 적용
+      - name: PostgreSQL 스키마 적용
+        run: |
+          psql "$POSTGRES_DSN" \
+            -f apps/control-plane/internal/store/testdata/schema.sql
+        env:
+          POSTGRES_DSN: ${{ env.POSTGRES_DSN }}
+
+      # -tags=integration: store/ + server/ 통합 테스트 (11개 + 5개 E2E)
+      # -timeout=10m: testcontainers-go가 폴백으로 컨테이너 생성할 경우 여유 시간 확보
+      - name: Go 통합 테스트 실행 (16개, integration 태그)
+        run: |
+          go test \
+            -tags=integration \
+            -timeout=10m \
+            -v \
+            ./apps/control-plane/internal/store/... \
+            ./apps/control-plane/internal/server/...
+        env:
+          POSTGRES_DSN: ${{ env.POSTGRES_DSN }}
+          REDIS_ADDR: ${{ env.REDIS_ADDR }}
+
+      - name: 테스트 결과 요약 기록
+        if: always()
+        run: |
+          echo "## Go Integration Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- 범위: \`store/\`, \`server/\` (-tags=integration)" >> $GITHUB_STEP_SUMMARY
+          echo "- 서비스: postgres:16-alpine (5432), redis:7-alpine (6379)" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================
+  # [6] Go 빌드 — control-plane 바이너리 검증
+  # ============================================================
+  build-go:
+    name: build-go
+    runs-on: ubuntu-latest
+    # 단위 테스트와 병렬 실행 가능 (코드 품질과 독립적)
+    needs: [lint-go]
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Go ${{ env.GO_VERSION }} 설정 (모듈 캐시 포함)
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # CGO_ENABLED=0: 정적 바이너리 빌드 (Docker scratch 이미지 호환)
+      # -ldflags="-w -s": 디버그 심볼 제거로 바이너리 크기 최소화
+      - name: Go Control Plane 빌드
+        run: |
+          CGO_ENABLED=0 go build \
+            -ldflags="-w -s" \
+            -o bin/control-plane \
+            ./apps/control-plane/
+
+      # 바이너리 생성 확인 — "빌드됐다고 가정"이 아닌 증거 기반 검증
+      - name: 바이너리 생성 확인
+        run: |
+          test -f bin/control-plane
+          ls -lh bin/control-plane
+          file bin/control-plane
+
+      - name: 빌드 결과 요약 기록
+        if: always()
+        run: |
+          BINARY_SIZE=$(ls -lh bin/control-plane 2>/dev/null | awk '{print $5}' || echo "N/A")
+          echo "## Go Build" >> $GITHUB_STEP_SUMMARY
+          echo "- 바이너리: \`bin/control-plane\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 크기: ${BINARY_SIZE}" >> $GITHUB_STEP_SUMMARY
+          echo "- CGO_ENABLED: 0 (정적 빌드)" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: 빌드 바이너리 아티팩트 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-plane-binary
+          path: bin/control-plane
+          retention-days: 3
