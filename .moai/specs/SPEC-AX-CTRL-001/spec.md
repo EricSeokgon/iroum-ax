@@ -1,6 +1,6 @@
 ---
 id: SPEC-AX-CTRL-001
-version: 0.1.0
+version: 0.1.2
 status: draft
 created: 2026-05-14
 updated: 2026-05-14
@@ -11,6 +11,8 @@ issue_number: 0
 
 # HISTORY
 
+- 0.1.2 (2026-05-14): evaluator-active 교차 검증 후속 보정. D11(AC 카운트 25→26, acceptance.md §9 + spec-compact.md 일관성) + D12(AC-CTRL-UBI-002-B 액션명 'WORKFLOW_STATE_TRANSITION OR ...' 이중 표기 → 단일 'WORKFLOW_TRANSITIONED_TO_RUNNING' 통일, research.md §2.2 enumeration 정합). D13/F1은 비차단 info → Sprint S3 이전 후속 처리 예정. (작성자: ircp)
+- 0.1.1 (2026-05-14): plan-auditor iter 1 리뷰 반영(iter 2 수정). D1/D2 Major 결함 해결을 위해 REQ-CTRL-UBI-001/UBI-002 전용 AC 추가(AC-CTRL-UBI-001 트랜잭션 원자성, AC-CTRL-UBI-002-A/B/C 감사 일관성 + cli-anonymous 기본값). D3 broken citation 수정(plan.md L367 → `.claude/skills/moai/workflows/plan.md:366` Composite domain rules). D4 AC 헤딩 일관성 정리("Edge Case " 접두사 제거). D5 Celery dispatch latency p99 전용 AC(AC-CTRL-005-4) 추가. D6 Prometheus Optional AC(AC-CTRL-002-4) 추가. D7 REST 게이트웨이 startup AC(AC-CTRL-003-4) 추가. D8 PostgreSQL mid-tx 실패 AC(AC-CTRL-004-4) 추가. Total AC: 18 → 25. spec-compact.md 재생성. (작성자: ircp)
 - 0.1.0 (2026-05-14): SPEC-AX-001 Sprint 7 (T-AX-006 Control Plane)을 별도 SPEC으로 분리한 첫 초안. iroum-ax Go control plane Walking Skeleton 정의 — gRPC + REST 서버, 워크플로우 상태머신, PostgreSQL store, Celery dispatch via Redis. SPEC-AX-001(Python 파이프라인 PASSED + GREEN)이 정의한 5개 REQ-AX(Document Ingestion → Mapping → Scoring → Generation → Recommendation)의 오케스트레이션 계층. Console UI·인증·멀티테넌트·재시도 정책 의도적 제외. (작성자: ircp)
 
 > Schema note: YAML frontmatter는 SPEC-AX-001과 동일하게 `.claude/skills/moai/workflows/plan.md` Phase 2 (L378)의 8-field 정의(id, version, status, created, updated, author, priority, issue_number)를 따른다.
@@ -41,7 +43,7 @@ Sprint 0 scaffolding 산출물(`apps/control-plane/main.go`, `cmd/server/server.
 
 - 1차 도메인: `AX` (iroum-ax 프로젝트 전체)
 - 2차 도메인: `CTRL` (Control Plane sub-domain)
-- 따라서 SPEC ID: `SPEC-AX-CTRL-001` (2 domains, plan.md L367 3-domain 한계 내)
+- 따라서 SPEC ID: `SPEC-AX-CTRL-001` (2 domains, `.claude/skills/moai/workflows/plan.md:366` Composite domain rules — "Maximum 2 domains recommended, maximum 3 allowed" 권장 범위 내)
 
 ---
 
