@@ -248,9 +248,69 @@
 
 ---
 
-## 향후 Sprint
+## Sprint 7: E2E Integration (AC-CTRL-E2E-1)
 
-| Sprint | REQ | 예상 시작 |
-|--------|-----|---------|
-| Sprint 6 GREEN | REQ-CTRL-005 Celery Dispatch 구현 | Sprint 6 RED 완료 후 |
-| Sprint 7 | E2E Integration (docker-compose) | Sprint 6 완료 후 |
+| 날짜 | 단계 | AC 완료 | 에러 Delta | 상태 |
+|------|------|---------|-----------|------|
+| 2026-05-14 | RED | 0/10 (Sprint Contract 기준) | +0 | COMPLETE |
+| 2026-05-14 | GREEN | 10/10 | +0 | COMPLETE |
+| 2026-05-14 | REFACTOR | 10/10 | +0 | **PASSED** |
+
+**Sprint 7 산출물**:
+- `.moai/sprints/SPEC-AX-CTRL-001/sprint-E2E.md` — Sprint Contract (Completeness 우선, 10개 검증 기준)
+- `apps/control-plane/internal/server/e2e_test.go` — 5개 E2E 통합 테스트 (`//go:build integration`)
+
+**Sprint 7 목표 AC** (10개, 전체 PASS):
+- [x] AC-1: POST /api/v1/workflows → HTTP 201 Created
+- [x] AC-2: PostgreSQL workflows 행: status=PENDING
+- [x] AC-3: PostgreSQL audit_logs 행: action=WORKFLOW_CREATED, user_id=cli-anonymous
+- [x] AC-4: Redis celery queue: envelope 1건, headers.id == workflow_id
+- [x] AC-5: PENDING→RUNNING: StateMachine.Start() + workflows.status=RUNNING
+- [x] AC-6: PENDING→RUNNING: audit_logs WORKFLOW_TRANSITIONED_TO_RUNNING 1건
+- [x] AC-7: Redis 닫힌 후 Dispatch → errors.Is(err, ErrDispatchFailed)
+- [x] AC-8: 3개 생성 후 GET /api/v1/workflows → 배열 길이 >= 3
+- [x] AC-9: 5개 동시 POST → 모두 HTTP 201 + workflow_id 중복 없음
+- [x] AC-10: PostgreSQL: 5개 동시 생성 후 DB 행 5개
+
+**E2E 테스트 결과** (testcontainers: postgres:16-alpine + redis:7-alpine):
+- `TestE2E_FullWorkflowCreationFlow` — PASS (7.80s)
+- `TestE2E_StateTransitionWithAudit` — PASS (6.90s)
+- `TestE2E_DispatchFailure_HandledGracefully` — PASS (0.91s, 컨테이너 없음)
+- `TestE2E_ListWorkflows_ReturnsAll` — PASS (6.86s)
+- `TestE2E_ConcurrentCreationFromREST` — PASS (6.86s)
+- **총 E2E 실행 시간**: 29.345s
+
+**유닛 테스트 회귀 검사**: Sprint 1-6 79개 테스트 전체 PASS (회귀 0건)
+
+**품질 게이트**:
+- `go build ./apps/control-plane/...` → PASS
+- `go vet ./apps/control-plane/...` → PASS (0 오류)
+- `golangci-lint run ./apps/control-plane/...` → PASS (0 이슈, fieldalignment 포함)
+- `goleak.VerifyNone` → PASS (8개 외부 라이브러리 고루틴 필터 적용: pgxpool, testcontainers, go-redis, net/http)
+- 빌드 태그: `//go:build integration` 정상 격리 확인
+
+**인프라 구성**:
+- testcontainers-go v0.42.0: postgres:16-alpine + redis:7-alpine
+- goRedisAdapter: go-redis v9 → scheduler.RedisClient 인터페이스 어댑터
+- t.Cleanup 패턴: 컨테이너 Terminate 호출 (defer 금지 규칙 준수)
+- context.WithTimeout(120s): 컨테이너 기동 타임아웃 대응
+
+**에러 Delta**: +0 (LSP baseline 변동 없음)
+
+---
+
+## SPEC-AX-CTRL-001 최종 완료
+
+| Sprint | 범위 | 테스트 수 | 상태 |
+|--------|------|---------|------|
+| Sprint 0 | Foundation (타입, 에러, config, log) | 0 (구조 only) | PASSED |
+| Sprint 1 | REQ-CTRL-UBI-001/002 (Store 인터페이스, Recorder) | 26 | PASSED |
+| Sprint 2 | REQ-CTRL-001 State Machine | +14 → 40 | PASSED |
+| Sprint 3 | REQ-CTRL-004 PostgreSQL Store | +11 통합 | PASSED |
+| Sprint 4 | REQ-CTRL-002 gRPC Server | +12 → 52 | PASSED |
+| Sprint 5 | REQ-CTRL-003 REST API | +12 → 64 | PASSED |
+| Sprint 6 | REQ-CTRL-005 Celery Dispatch | +15 → 79 | PASSED |
+| Sprint 7 | E2E Integration (AC-CTRL-E2E-1) | +5 E2E → 84 total | **PASSED** |
+
+**전체 테스트**: 단위 79개 + E2E 5개 = 84개 (모두 PASS)
+**AC 완료**: Sprint Contract 10/10 (E2E), SPEC acceptance.md AC 전체 충족
