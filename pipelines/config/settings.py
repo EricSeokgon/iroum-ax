@@ -3,8 +3,53 @@
 모든 설정은 환경 변수 또는 .env 파일에서 로드됨.
 기본값은 로컬 개발(docker-compose) 환경 기준.
 """
+from __future__ import annotations
+
+from urllib.parse import urlparse
+
+from pkg.errors.custom_errors import ExternalLLMBlockedError
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 허용된 내부 호스트 패턴 (allowlist)
+# @MX:NOTE: [AUTO] 외부 LLM 차단을 위한 allowlist — REQ-UBI-001 AC-UBI-001
+# @MX:SPEC: SPEC-AX-001 REQ-UBI-001
+_ALLOWED_HOSTS: frozenset[str] = frozenset(
+    [
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    ]
+)
+
+
+def validate_llm_endpoint(url: str) -> bool:
+    """LLM 엔드포인트 URL이 내부 allowlist에 속하는지 검증한다.
+
+    # @MX:ANCHOR: [AUTO] 외부 LLM 호출 차단 진입점 — fan_in >= 3 예상
+    # @MX:REASON: REQ-UBI-001 데이터 주권 — 외부 LLM API 호출 원천 차단
+
+    Args:
+        url: 검증할 LLM 엔드포인트 URL
+
+    Returns:
+        True — 내부 allowlist 호스트인 경우
+
+    Raises:
+        ExternalLLMBlockedError: 외부 호스트이거나 파싱 불가 URL인 경우
+    """
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+    except Exception as exc:
+        raise ExternalLLMBlockedError(f"LLM 엔드포인트 URL 파싱 실패: {url!r}") from exc
+
+    if host not in _ALLOWED_HOSTS:
+        raise ExternalLLMBlockedError(
+            f"외부 LLM 엔드포인트 차단됨: {host!r} — allowlist={sorted(_ALLOWED_HOSTS)}"
+        )
+
+    return True
 
 
 class Settings(BaseSettings):
@@ -83,10 +128,17 @@ class Settings(BaseSettings):
     )
 
     # --- 보안 / 인증 ---
-    auth_enabled: bool = Field(default=False, description="인증 활성화 여부 (PoC: False)")
+    auth_enabled: bool = Field(
+        default=False,
+        alias="auth_enabled",
+        description="인증 활성화 여부 (PoC: False)",
+        validation_alias="AUTH_ENABLED",
+    )
     default_user_id: str = Field(
         default="cli-anonymous",
+        alias="default_user_id",
         description="미인증 사용자 기본 ID (sandbox 환경)",
+        validation_alias="DEFAULT_USER_ID",
     )
 
     # --- 로깅 ---
