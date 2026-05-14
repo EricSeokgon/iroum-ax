@@ -207,10 +207,50 @@
 
 ---
 
+## Sprint 6: REQ-CTRL-005 Celery Dispatch
+
+| 날짜 | 단계 | AC 완료 | 에러 Delta | 상태 |
+|------|------|---------|-----------|------|
+| 2026-05-14 | RED | 0/15 (AC-CTRL-005-1/2/3/4) | +0 | COMPLETE |
+
+**Sprint 6 RED 산출물**:
+- `.moai/sprints/SPEC-AX-CTRL-001/sprint-REQ-CTRL-005.md` — Sprint Contract (Originality 35% / Functionality 35% 우선)
+- `apps/control-plane/internal/scheduler/dispatcher.go` — CeleryDispatcher + RedisClient 인터페이스 + ErrNotImplemented stub (Sprint 0 stub 교체)
+- `apps/control-plane/internal/scheduler/dispatcher_test.go` — 15개 테스트 + 1개 벤치마크
+- `apps/control-plane/internal/scheduler/testdata/celery_envelope_v2.json` — 수동 생성 golden file (Kombu v2 envelope)
+
+**Sprint 6 목표 AC** (4개 그룹, 15개 테스트):
+- [ ] AC-CTRL-005-1 (BuildEnvelope golden file byte match + 필수 필드 + base64 body + argsrepr/kwargsrepr)
+- [ ] AC-CTRL-005-2 (Dispatch Redis RPUSH + custom queue + unavailable error + failure→FAILED + context cancel)
+- [ ] AC-CTRL-005-3 (envelope 직렬화 실패 → RPUSH 0건)
+- [ ] AC-CTRL-005-4 (dispatch p99 < 100ms)
+
+**실제 테스트 수**: 15개 신규 (dispatcher_test.go)
+**RED 상태 확인**:
+- `go build ./apps/control-plane/...` → PASS
+- `go vet ./apps/control-plane/...` → PASS (0 오류)
+- `golangci-lint run ./apps/control-plane/...` → PASS (0 오류)
+- `go test ./apps/control-plane/internal/scheduler/... -v`:
+  - 2 FAIL (RED 정상): TestPythonReprList, TestPythonReprDict (stub 빈 문자열 반환)
+  - 13 PASS: ErrNotImplemented assert 구조 (GREEN에서 실제 로직 검증으로 전환 예정)
+- Sprint 1-5 회귀 없음: audit PASS, store PASS, workflow PASS, server PASS
+
+**Mock 전략**: go-redis 직접 의존 없이 `RedisClient` 인터페이스 (RPush + Ping) 기반 mock
+- miniredis 불필요 (go.mod 미포함) — 인터페이스 mock으로 Redis unavailable 시나리오 커버
+- AC-CTRL-005-4 latency 테스트는 GREEN에서 실제 RPUSH 호출 시 miniredis 추가 가능
+
+**Golden file 방식**: 수동 생성 (hand-crafted)
+- Python Kombu 스크립트 미실행 환경에서 research.md §3.1 기반 구성
+- body base64: `[["d-fixed-005-001"],{"workflow_id":"fixed-test-uuid-005-001"},{"callbacks":null,"chain":null,"chord":null,"errbacks":null}]` (compact JSON) → base64
+- GREEN 완료 후 선택적으로 `python3 scripts/generate_celery_golden.py` 실행하여 검증 가능
+
+**에러 Delta**: +0 (LSP baseline 변동 없음)
+
+---
+
 ## 향후 Sprint
 
 | Sprint | REQ | 예상 시작 |
 |--------|-----|---------|
-| Sprint 5 GREEN | REQ-CTRL-003 REST API 비즈니스 로직 구현 | Sprint 5 RED 완료 후 |
-| Sprint 6 | REQ-CTRL-005 Celery Dispatch (miniredis) | Sprint 5 완료 후 |
+| Sprint 6 GREEN | REQ-CTRL-005 Celery Dispatch 구현 | Sprint 6 RED 완료 후 |
 | Sprint 7 | E2E Integration (docker-compose) | Sprint 6 완료 후 |
