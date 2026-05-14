@@ -238,32 +238,88 @@ GREEN phase 통과 기준:
 
 ---
 
-## 다음 단계: Sprint 3 GREEN Phase
+---
 
-GREEN phase에서 구현할 모듈:
-1. `pkg/errors/custom_errors.py` — `IndexNotBootstrappedError`, `IndexRebuildingError` 예외 클래스 추가
-2. `pipelines/mapping/criterion_parser.py` — `CriterionParser` (평가편람 PDF 파싱, hanja 정규화)
-3. `pipelines/mapping/embedding_service.py` — `EmbeddingService` (ko-sroberta-multitask wrapping)
-4. `pipelines/mapping/vector_store.py` — `VectorStore` (pgvector HNSW, FakeVectorStore 포함)
-5. `pipelines/mapping/retriever.py` — `Retriever` (embed + query 오케스트레이션, cold-start 처리)
+## Sprint 4: REQ-AX-003 — RED Phase COMPLETE
 
-GREEN phase 통과 기준:
-- 35개 Sprint 3 테스트 모두 PASS
-- 54개 Sprint 1+2 테스트 회귀 없음 유지
+- 진입일: 2026-05-14
+- 단계: RED (실패 테스트 작성 완료)
+
+### RED Phase 결과
+
+| 지표 | 값 |
+|------|---|
+| 수집된 테스트 수 | 29 (4파일) |
+| 실패 테스트 수 | 29 (ModuleNotFoundError — 구현 모듈 미존재) |
+| 통과 테스트 수 | 0 |
+| 실패 원인 | ModuleNotFoundError: pipelines.scoring.{benchmark_learner, grade_predictor, scenario_simulator} |
+| Sprint 1+2+3 회귀 | 없음 (89/89 통과 유지) |
+| Coverage | 0% (구현 없음, 예상됨) |
+| RED 상태 확인 | YES |
+
+### 생성된 테스트 파일
+
+| 파일 | AC | 테스트 수 |
+|------|----|----------|
+| `tests/unit/test_req_ax_003_benchmark_learner.py` | AC-003-1 (×5), AC-003-3 (×1), AC-003-3 학습 중 차단 (×1) | 7 |
+| `tests/unit/test_req_ax_003_grade_predictor.py` | AC-003-1 (×6), AC-003-2 abstain (×6), AC-003-3 metadata (×2) | 14 |
+| `tests/unit/test_req_ax_003_scenario_simulator.py` | B→A 시나리오 (×5) | 5 |
+| `tests/unit/test_req_ax_003_integration.py` | E2E 통합 (×3) | 3 |
+
+### 추가 생성 파일
+
+| 파일 | 내용 |
+|------|------|
+| `.moai/sprints/SPEC-AX-001/sprint-REQ-AX-003.md` | Sprint Contract (Priority: Functionality, 수학 불변식 + abstain 분기) |
+| `pkg/models/simulation.py` | GradeDistribution, BenchmarkReport, ScenarioResult Pydantic 모델 (불변식 검증 포함) |
+
+### Sprint 4 AC 상태
+
+| AC | 설명 | 상태 |
+|----|------|------|
+| AC-003-1 | {A, B, abstain} sum=1.0±0.001 + 1s 응답 + simulations 저장 | RED |
+| AC-003-2 | max(p_a, p_b) < 0.5 → status=low_confidence, prediction=null, candidates 반환 | RED |
+| AC-003-3 | 학습 중 HTTP 503 + model_used 메타데이터 추적 | RED |
+
+- 누적 AC 완료: 0 / 24
+- 직전 대비 신규 AC 통과: 0 (RED phase — 예상됨)
+- LSP error delta: +0 (테스트/모델 파일만 추가, 구현 없음)
+- Coverage delta: 0% → 0% (구현 없음)
+
+### Re-planning Gate 체크
+
+- 연속 zero AC 카운터: 4 (RED phase 네 번째 entry — 정상, RED phase는 zero AC가 정상)
+- Stagnation: NO (RED phase 완료, GREEN 진입 예정)
+
+---
+
+## 다음 단계: Sprint 4 GREEN Phase
+
+GREEN phase에서 구현할 모듈 (Sprint 4 신규):
+1. `pipelines/scoring/benchmark_learner.py` — `BenchmarkLearner` 클래스 (TF-IDF + scikit-learn LogisticRegression, state machine: idle→training→ready)
+2. `pipelines/scoring/grade_predictor.py` — `GradePredictor` 클래스 (2-class softmax + abstain 3-way output, p_abstain=1-p_a-p_b)
+3. `pipelines/scoring/scenario_simulator.py` — `ScenarioSimulator` 클래스 (B→A 시나리오 시뮬레이션)
+4. `pkg/errors/custom_errors.py` — `ModelTrainingError` 추가 (학습 중 예측 차단용)
+
+GREEN phase 통과 기준 (Sprint 4):
+- 29개 Sprint 4 테스트 모두 PASS
+- 89개 Sprint 1+2+3 테스트 회귀 없음 유지
+- 확률 합 불변식 100건 배치 위반 0건
 - LSP errors=0, type_errors=0, lint_errors=0
 - Coverage >= 85%
 
-GREEN phase에서 구현할 모듈:
-1. `pkg/models/document.py` — `ParsedDocument`, `Table`, `DocumentMetadata` Pydantic 모델 추가
-2. `pkg/errors/custom_errors.py` — `OCRConcurrencyError` 예외 클래스 추가
-3. `pipelines/ingestion/hwp_parser.py` — `HWPParser` 클래스 (vlm_processor 의존성 주입, OLE 폴백 로직)
-4. `pipelines/ingestion/pdf_parser.py` — `PDFParser` 클래스 (회전 페이지 처리)
-5. `pipelines/ingestion/vlm_processor.py` — `VLMProcessor` 클래스 (CPU/GPU 분기, last_inference_meta)
-6. `pipelines/ingestion/table_extractor.py` — `TableExtractor` 클래스 (회전 보정, 셀 논리 순서)
-7. `tests/fixtures/generate_fixtures.py` — 합성 HWP/PDF 픽스처 생성 스크립트
+Sprint 3 GREEN phase에서 구현할 모듈 (이전 목록 보존):
+1. `pkg/errors/custom_errors.py` — `IndexNotBootstrappedError`, `IndexRebuildingError`
+2. `pipelines/mapping/criterion_parser.py`
+3. `pipelines/mapping/embedding_service.py`
+4. `pipelines/mapping/vector_store.py`
+5. `pipelines/mapping/retriever.py`
 
-GREEN phase 통과 기준:
-- 31개 Sprint 2 테스트 모두 PASS
-- 25개 Sprint 1 테스트 회귀 없음 유지
-- LSP errors=0, type_errors=0, lint_errors=0
-- Coverage >= 85%
+Sprint 2 GREEN phase에서 구현할 모듈 (이전 목록 보존):
+1. `pkg/models/document.py`
+2. `pkg/errors/custom_errors.py` — `OCRConcurrencyError`
+3. `pipelines/ingestion/hwp_parser.py`
+4. `pipelines/ingestion/pdf_parser.py`
+5. `pipelines/ingestion/vlm_processor.py`
+6. `pipelines/ingestion/table_extractor.py`
+7. `tests/fixtures/generate_fixtures.py`
