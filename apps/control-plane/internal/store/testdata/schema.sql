@@ -16,25 +16,15 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- ============================================================
--- 문서 테이블 (workflows 외래키 참조 해소용 최소 정의)
--- ============================================================
-CREATE TABLE IF NOT EXISTS documents (
-    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    filename    VARCHAR(512)     NOT NULL,
-    file_type   VARCHAR(16)      NOT NULL DEFAULT 'PDF',
-    status      VARCHAR(32)      NOT NULL DEFAULT 'PENDING',
-    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
-);
-
--- ============================================================
 -- 워크플로우 테이블
 -- Sprint 3 핵심 대상 테이블
+-- 통합 테스트에서 document_id FK 없이 UUID를 직접 삽입할 수 있도록 참조 제약 없음
 -- ============================================================
 CREATE TABLE IF NOT EXISTS workflows (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id     VARCHAR(64)          NOT NULL DEFAULT 'cli-anonymous',
     status      workflow_status_enum NOT NULL DEFAULT 'PENDING',
-    document_id UUID REFERENCES documents(id) ON DELETE SET NULL,
+    document_id UUID,
     report_id   UUID,
     result_json JSONB,
     created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
