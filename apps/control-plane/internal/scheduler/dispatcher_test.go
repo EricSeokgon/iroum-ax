@@ -1,5 +1,5 @@
-// dispatcher_test.go — REQ-CTRL-005 Celery dispatch RED phase 테스트
-// Sprint 6 RED: 모든 테스트가 ErrNotImplemented로 실패해야 함 (GREEN 이전 상태)
+// dispatcher_test.go — REQ-CTRL-005 Celery dispatch GREEN phase 테스트
+// Sprint 6 GREEN: 실제 구현에 대한 동작 검증 (ErrNotImplemented 가드 제거)
 // AC-CTRL-005-1: Celery envelope golden file byte match
 // AC-CTRL-005-2: Redis unavailable → ErrDispatchFailed
 // AC-CTRL-005-3: Serialization failure → no RPUSH
@@ -79,8 +79,8 @@ const (
 // --- AC-CTRL-005-1: Celery envelope golden file byte match ---
 
 // TestCeleryDispatcher_BuildEnvelope_GoldenFileMatch
-// 고정 입력으로 생성한 envelope가 골든 파일과 byte-for-byte 일치해야 함
-// RED: ErrNotImplemented 반환 → FAIL 예상
+// 고정 입력으로 생성한 envelope가 골든 파일과 JSON 구조적으로 일치해야 함
+// GREEN: 실제 BuildEnvelope 구현이 정상 동작 — NoError + JSON 동등성 검증
 func TestCeleryDispatcher_BuildEnvelope_GoldenFileMatch(t *testing.T) {
 	t.Parallel()
 
@@ -100,25 +100,21 @@ func TestCeleryDispatcher_BuildEnvelope_GoldenFileMatch(t *testing.T) {
 	// Act
 	got, err := d.BuildEnvelope(fixedWorkflowID, fixedDocumentID, fixedDeliveryTag, fixedReplyTo)
 
-	// Assert: GREEN 이전에는 ErrNotImplemented 반환
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrNotImplemented, "GREEN 이전: ErrNotImplemented 반환 필요")
-	assert.Nil(t, got)
+	// Assert: GREEN — 실제 구현이 정상 동작해야 함
+	require.NoError(t, err, "BuildEnvelope가 에러 없이 완료되어야 함")
+	require.NotNil(t, got, "BuildEnvelope가 비어있지 않은 바이트를 반환해야 함")
 
-	// GREEN 이후 검증용 단언 (지금은 도달하지 않음)
-	if got != nil {
-		var gotEnvelope map[string]interface{}
-		require.NoError(t, json.Unmarshal(got, &gotEnvelope))
-		normalizedGot, err := json.Marshal(gotEnvelope)
-		require.NoError(t, err)
-		assert.Equal(t, string(normalizedGolden), string(normalizedGot),
-			"envelope이 골든 파일과 일치해야 함")
-	}
+	var gotEnvelope map[string]interface{}
+	require.NoError(t, json.Unmarshal(got, &gotEnvelope))
+	normalizedGot, err := json.Marshal(gotEnvelope)
+	require.NoError(t, err)
+	assert.Equal(t, string(normalizedGolden), string(normalizedGot),
+		"envelope이 골든 파일과 일치해야 함")
 }
 
 // TestCeleryDispatcher_BuildEnvelope_RequiredFields
 // 생성된 envelope에 Kombu v2 필수 필드가 모두 포함되어야 함
-// RED: ErrNotImplemented 반환 → FAIL 예상
+// GREEN: 실제 BuildEnvelope 구현 검증
 func TestCeleryDispatcher_BuildEnvelope_RequiredFields(t *testing.T) {
 	t.Parallel()
 
@@ -129,48 +125,44 @@ func TestCeleryDispatcher_BuildEnvelope_RequiredFields(t *testing.T) {
 	// Act
 	got, err := d.BuildEnvelope(fixedWorkflowID, fixedDocumentID, fixedDeliveryTag, fixedReplyTo)
 
-	// Assert: GREEN 이전에는 ErrNotImplemented 반환
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrNotImplemented)
-	assert.Nil(t, got)
+	// Assert: GREEN — 에러 없이 필수 필드 포함
+	require.NoError(t, err, "BuildEnvelope가 에러 없이 완료되어야 함")
+	require.NotNil(t, got)
 
-	// GREEN 이후 검증용
-	if got != nil {
-		var envelope map[string]interface{}
-		require.NoError(t, json.Unmarshal(got, &envelope))
+	var envelope map[string]interface{}
+	require.NoError(t, json.Unmarshal(got, &envelope))
 
-		// 최상위 필수 필드
-		assert.Equal(t, "utf-8", envelope["content-encoding"])
-		assert.Equal(t, "application/json", envelope["content-type"])
-		assert.NotEmpty(t, envelope["body"])
+	// 최상위 필수 필드
+	assert.Equal(t, "utf-8", envelope["content-encoding"])
+	assert.Equal(t, "application/json", envelope["content-type"])
+	assert.NotEmpty(t, envelope["body"])
 
-		// headers 필드 검증
-		headers, ok := envelope["headers"].(map[string]interface{})
-		require.True(t, ok, "headers 필드가 object여야 함")
-		assert.Equal(t, "py", headers["lang"])
-		assert.Equal(t, fixedTaskName, headers["task"])
-		assert.Equal(t, fixedWorkflowID, headers["id"])
-		assert.Equal(t, fixedWorkflowID, headers["root_id"])
-		assert.Nil(t, headers["parent_id"])
+	// headers 필드 검증
+	headers, ok := envelope["headers"].(map[string]interface{})
+	require.True(t, ok, "headers 필드가 object여야 함")
+	assert.Equal(t, "py", headers["lang"])
+	assert.Equal(t, fixedTaskName, headers["task"])
+	assert.Equal(t, fixedWorkflowID, headers["id"])
+	assert.Equal(t, fixedWorkflowID, headers["root_id"])
+	assert.Nil(t, headers["parent_id"])
 
-		// properties 필드 검증
-		props, ok := envelope["properties"].(map[string]interface{})
-		require.True(t, ok, "properties 필드가 object여야 함")
-		assert.Equal(t, fixedWorkflowID, props["correlation_id"])
-		assert.Equal(t, "base64", props["body_encoding"])
-		assert.Equal(t, float64(2), props["delivery_mode"])
-		assert.Equal(t, float64(0), props["priority"])
+	// properties 필드 검증
+	props, ok := envelope["properties"].(map[string]interface{})
+	require.True(t, ok, "properties 필드가 object여야 함")
+	assert.Equal(t, fixedWorkflowID, props["correlation_id"])
+	assert.Equal(t, "base64", props["body_encoding"])
+	assert.Equal(t, float64(2), props["delivery_mode"])
+	assert.Equal(t, float64(0), props["priority"])
 
-		deliveryInfo, ok := props["delivery_info"].(map[string]interface{})
-		require.True(t, ok)
-		assert.Equal(t, "", deliveryInfo["exchange"])
-		assert.Equal(t, "celery", deliveryInfo["routing_key"])
-	}
+	deliveryInfo, ok := props["delivery_info"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "", deliveryInfo["exchange"])
+	assert.Equal(t, "celery", deliveryInfo["routing_key"])
 }
 
 // TestCeleryDispatcher_BuildEnvelope_BodyBase64Decodable
 // envelope body를 base64 디코드하면 유효한 JSON [args, kwargs, embed] 배열이어야 함
-// RED: ErrNotImplemented 반환 → FAIL 예상
+// GREEN: 실제 BuildEnvelope body 구조 검증
 func TestCeleryDispatcher_BuildEnvelope_BodyBase64Decodable(t *testing.T) {
 	t.Parallel()
 
@@ -179,46 +171,45 @@ func TestCeleryDispatcher_BuildEnvelope_BodyBase64Decodable(t *testing.T) {
 
 	got, err := d.BuildEnvelope(fixedWorkflowID, fixedDocumentID, fixedDeliveryTag, fixedReplyTo)
 
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrNotImplemented)
+	// GREEN — 에러 없이 body 구조 검증
+	require.NoError(t, err, "BuildEnvelope가 에러 없이 완료되어야 함")
+	require.NotNil(t, got)
 
-	if got != nil {
-		var envelope map[string]interface{}
-		require.NoError(t, json.Unmarshal(got, &envelope))
+	var envelope map[string]interface{}
+	require.NoError(t, json.Unmarshal(got, &envelope))
 
-		bodyStr, ok := envelope["body"].(string)
-		require.True(t, ok)
+	bodyStr, ok := envelope["body"].(string)
+	require.True(t, ok)
 
-		decoded, err := base64.StdEncoding.DecodeString(bodyStr)
-		require.NoError(t, err, "body는 base64 디코드 가능해야 함")
+	decoded, err := base64.StdEncoding.DecodeString(bodyStr)
+	require.NoError(t, err, "body는 base64 디코드 가능해야 함")
 
-		var bodyArray []interface{}
-		require.NoError(t, json.Unmarshal(decoded, &bodyArray), "body JSON은 배열이어야 함")
-		require.Len(t, bodyArray, 3, "body는 [args, kwargs, embed] 3개 요소여야 함")
+	var bodyArray []interface{}
+	require.NoError(t, json.Unmarshal(decoded, &bodyArray), "body JSON은 배열이어야 함")
+	require.Len(t, bodyArray, 3, "body는 [args, kwargs, embed] 3개 요소여야 함")
 
-		// args: ["d-fixed-005-001"]
-		args, ok := bodyArray[0].([]interface{})
-		require.True(t, ok)
-		assert.Equal(t, fixedDocumentID, args[0])
+	// args: ["d-fixed-005-001"]
+	args, ok := bodyArray[0].([]interface{})
+	require.True(t, ok)
+	assert.Equal(t, fixedDocumentID, args[0])
 
-		// kwargs: {"workflow_id": "fixed-test-uuid-005-001"}
-		kwargs, ok := bodyArray[1].(map[string]interface{})
-		require.True(t, ok)
-		assert.Equal(t, fixedWorkflowID, kwargs["workflow_id"])
+	// kwargs: {"workflow_id": "fixed-test-uuid-005-001"}
+	kwargs, ok := bodyArray[1].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, fixedWorkflowID, kwargs["workflow_id"])
 
-		// embed: {"callbacks":null, "chain":null, "chord":null, "errbacks":null}
-		embed, ok := bodyArray[2].(map[string]interface{})
-		require.True(t, ok)
-		assert.Nil(t, embed["callbacks"])
-		assert.Nil(t, embed["chain"])
-		assert.Nil(t, embed["chord"])
-		assert.Nil(t, embed["errbacks"])
-	}
+	// embed: {"callbacks":null, "chain":null, "chord":null, "errbacks":null}
+	embed, ok := bodyArray[2].(map[string]interface{})
+	require.True(t, ok)
+	assert.Nil(t, embed["callbacks"])
+	assert.Nil(t, embed["chain"])
+	assert.Nil(t, embed["chord"])
+	assert.Nil(t, embed["errbacks"])
 }
 
 // TestCeleryDispatcher_BuildEnvelope_ArgsKwargsRepr
 // Python repr 형식 argsrepr/kwargsrepr 검증
-// RED: ErrNotImplemented 반환 → FAIL 예상
+// GREEN: 실제 BuildEnvelope Python repr 필드 검증
 func TestCeleryDispatcher_BuildEnvelope_ArgsKwargsRepr(t *testing.T) {
 	t.Parallel()
 
@@ -227,23 +218,21 @@ func TestCeleryDispatcher_BuildEnvelope_ArgsKwargsRepr(t *testing.T) {
 
 	got, err := d.BuildEnvelope(fixedWorkflowID, fixedDocumentID, fixedDeliveryTag, fixedReplyTo)
 
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrNotImplemented)
+	// GREEN — 에러 없이 argsrepr/kwargsrepr 검증
+	require.NoError(t, err, "BuildEnvelope가 에러 없이 완료되어야 함")
+	require.NotNil(t, got)
 
-	if got != nil {
-		var envelope map[string]interface{}
-		require.NoError(t, json.Unmarshal(got, &envelope))
-		headers := envelope["headers"].(map[string]interface{})
+	var envelope map[string]interface{}
+	require.NoError(t, json.Unmarshal(got, &envelope))
+	headers := envelope["headers"].(map[string]interface{})
 
-		// Python list repr: ['d-fixed-005-001']
-		assert.Equal(t, "['d-fixed-005-001']", headers["argsrepr"])
-		// Python dict repr: {'workflow_id': 'fixed-test-uuid-005-001'}
-		assert.Equal(t, "{'workflow_id': 'fixed-test-uuid-005-001'}", headers["kwargsrepr"])
-	}
+	// Python list repr: ['d-fixed-005-001']
+	assert.Equal(t, "['d-fixed-005-001']", headers["argsrepr"])
+	// Python dict repr: {'workflow_id': 'fixed-test-uuid-005-001'}
+	assert.Equal(t, "{'workflow_id': 'fixed-test-uuid-005-001'}", headers["kwargsrepr"])
 }
 
 // TestPythonReprList Python list repr 변환 함수 단위 테스트
-// RED: pythonReprList("")가 빈 문자열 반환 → FAIL 예상
 func TestPythonReprList(t *testing.T) {
 	t.Parallel()
 
@@ -275,14 +264,12 @@ func TestPythonReprList(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := pythonReprList(tc.input)
-			// GREEN 이전: 빈 문자열 반환 → FAIL
 			assert.Equal(t, tc.expected, got)
 		})
 	}
 }
 
 // TestPythonReprDict Python dict repr 변환 함수 단위 테스트
-// RED: pythonReprDict(nil)이 빈 문자열 반환 → FAIL 예상
 func TestPythonReprDict(t *testing.T) {
 	t.Parallel()
 
@@ -308,7 +295,6 @@ func TestPythonReprDict(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := pythonReprDict(tc.input)
-			// GREEN 이전: 빈 문자열 반환 → FAIL
 			assert.Equal(t, tc.expected, got)
 		})
 	}
@@ -318,7 +304,7 @@ func TestPythonReprDict(t *testing.T) {
 
 // TestCeleryDispatcher_Dispatch_RedisRPUSH
 // 정상 dispatch가 Redis LIST "celery"에 RPUSH를 수행해야 함
-// RED: ErrNotImplemented 반환 → FAIL 예상
+// GREEN: 실제 Dispatch 구현 — RPUSH 1회 호출 검증
 func TestCeleryDispatcher_Dispatch_RedisRPUSH(t *testing.T) {
 	t.Parallel()
 
@@ -329,22 +315,17 @@ func TestCeleryDispatcher_Dispatch_RedisRPUSH(t *testing.T) {
 	// Act
 	err := d.Dispatch(context.Background(), fixedWorkflowID, fixedDocumentID)
 
-	// Assert: GREEN 이전에는 ErrNotImplemented
-	assert.ErrorIs(t, err, ErrNotImplemented)
-
-	// GREEN 이후 검증용
-	if !errors.Is(err, ErrNotImplemented) {
-		require.NoError(t, err)
-		require.Len(t, mockRedis.rpushCalls, 1, "RPUSH가 정확히 1회 호출되어야 함")
-		assert.Equal(t, "celery", mockRedis.rpushCalls[0].key,
-			"기본 queue 이름은 'celery'여야 함")
-		require.Len(t, mockRedis.rpushCalls[0].values, 1, "envelope 1개가 RPUSH되어야 함")
-	}
+	// Assert: GREEN — 에러 없이 RPUSH 1회 호출
+	require.NoError(t, err, "정상 dispatch는 에러를 반환하지 않아야 함")
+	require.Len(t, mockRedis.rpushCalls, 1, "RPUSH가 정확히 1회 호출되어야 함")
+	assert.Equal(t, "celery", mockRedis.rpushCalls[0].key,
+		"기본 queue 이름은 'celery'여야 함")
+	require.Len(t, mockRedis.rpushCalls[0].values, 1, "envelope 1개가 RPUSH되어야 함")
 }
 
 // TestCeleryDispatcher_Dispatch_CustomQueue
 // 커스텀 queue 이름으로 dispatch 시 해당 queue에 RPUSH해야 함
-// RED: ErrNotImplemented 반환 → FAIL 예상
+// GREEN: 실제 Dispatch 구현 — 커스텀 queue 검증
 func TestCeleryDispatcher_Dispatch_CustomQueue(t *testing.T) {
 	t.Parallel()
 
@@ -353,18 +334,14 @@ func TestCeleryDispatcher_Dispatch_CustomQueue(t *testing.T) {
 
 	err := d.Dispatch(context.Background(), fixedWorkflowID, fixedDocumentID)
 
-	assert.ErrorIs(t, err, ErrNotImplemented)
-
-	if !errors.Is(err, ErrNotImplemented) {
-		require.NoError(t, err)
-		require.Len(t, mockRedis.rpushCalls, 1)
-		assert.Equal(t, "custom_queue", mockRedis.rpushCalls[0].key)
-	}
+	require.NoError(t, err, "커스텀 queue dispatch는 에러를 반환하지 않아야 함")
+	require.Len(t, mockRedis.rpushCalls, 1)
+	assert.Equal(t, "custom_queue", mockRedis.rpushCalls[0].key)
 }
 
 // TestCeleryDispatcher_Dispatch_RedisUnavailable_ReturnsError
 // Redis가 불가능한 상태에서 dispatch 시 에러를 반환해야 함 (AC-CTRL-005-2)
-// RED: ErrNotImplemented 반환 → FAIL 예상 (ErrDispatchFailed가 아닌 ErrNotImplemented)
+// GREEN: ErrDispatchFailed 래핑 에러 반환 검증
 func TestCeleryDispatcher_Dispatch_RedisUnavailable_ReturnsError(t *testing.T) {
 	t.Parallel()
 
@@ -375,17 +352,16 @@ func TestCeleryDispatcher_Dispatch_RedisUnavailable_ReturnsError(t *testing.T) {
 	// Act
 	err := d.Dispatch(context.Background(), fixedWorkflowID, fixedDocumentID)
 
-	// Assert: GREEN 이전에는 ErrNotImplemented (ErrDispatchFailed가 아님)
-	// GREEN 이후에는 ErrDispatchFailed 또는 래핑된 에러여야 함
-	assert.Error(t, err)
-	// 현재 RED 상태: ErrNotImplemented 반환
-	assert.ErrorIs(t, err, ErrNotImplemented)
+	// Assert: GREEN — ErrDispatchFailed를 포함한 에러 반환
+	require.Error(t, err, "Redis 불가 상태에서 에러를 반환해야 함")
+	assert.ErrorIs(t, err, ErrDispatchFailed,
+		"Redis RPUSH 실패 시 ErrDispatchFailed가 래핑되어야 함 (AC-CTRL-005-2)")
 }
 
 // TestCeleryDispatcher_Dispatch_FailureMarksWorkflowFailed
 // dispatch 실패 시 ErrDispatchFailed를 포함한 에러를 반환해야 함 (R-CTRL-003 mitigation)
 // 호출자(handlers.go)가 이 에러를 받아 workflow FAILED로 전이하는 계약 검증
-// RED: ErrNotImplemented 반환 → FAIL 예상
+// GREEN: ErrDispatchFailed 래핑 검증
 func TestCeleryDispatcher_Dispatch_FailureMarksWorkflowFailed(t *testing.T) {
 	t.Parallel()
 
@@ -394,16 +370,15 @@ func TestCeleryDispatcher_Dispatch_FailureMarksWorkflowFailed(t *testing.T) {
 
 	err := d.Dispatch(context.Background(), fixedWorkflowID, fixedDocumentID)
 
-	assert.Error(t, err)
-	// GREEN 이후 검증: err가 ErrDispatchFailed를 포함해야 함
-	// assert.ErrorIs(t, err, ErrDispatchFailed)
-	// RED 상태 검증
-	assert.ErrorIs(t, err, ErrNotImplemented)
+	require.Error(t, err, "Redis 에러 시 dispatch가 에러를 반환해야 함")
+	// GREEN 검증: err가 ErrDispatchFailed를 포함해야 함 (R-CTRL-003: workflow FAILED 전이 계약)
+	assert.ErrorIs(t, err, ErrDispatchFailed,
+		"dispatch 실패 시 ErrDispatchFailed가 래핑되어야 함 — 호출자가 workflow FAILED로 전이 가능")
 }
 
 // TestCeleryDispatcher_Dispatch_ContextCancelled
 // context가 취소된 상태에서 dispatch 시 context 에러를 반환해야 함
-// RED: ErrNotImplemented 반환 → FAIL 예상
+// GREEN: context.Canceled 에러 체인 검증
 func TestCeleryDispatcher_Dispatch_ContextCancelled(t *testing.T) {
 	t.Parallel()
 
@@ -415,16 +390,15 @@ func TestCeleryDispatcher_Dispatch_ContextCancelled(t *testing.T) {
 
 	err := d.Dispatch(ctx, fixedWorkflowID, fixedDocumentID)
 
-	assert.Error(t, err)
-	// GREEN 이후 검증: context.Canceled 포함
-	// assert.ErrorIs(t, err, context.Canceled)
-	// RED 상태 검증
-	assert.ErrorIs(t, err, ErrNotImplemented)
+	require.Error(t, err, "취소된 context에서 dispatch는 에러를 반환해야 함")
+	// GREEN 검증: context.Canceled가 에러 체인에 포함되어야 함
+	assert.ErrorIs(t, err, context.Canceled,
+		"context 취소 시 context.Canceled가 에러 체인에 포함되어야 함")
 }
 
 // TestCeleryDispatcher_Dispatch_NoRPUSH_WhenEnvelopeFails
 // envelope 직렬화 실패 시 RPUSH가 발생하지 않아야 함 (AC-CTRL-005-3)
-// RED: ErrNotImplemented 반환 → FAIL 예상
+// GREEN: ErrEnvelopeSerializationFailed 래핑 + RPUSH 0건 검증
 func TestCeleryDispatcher_Dispatch_NoRPUSH_WhenEnvelopeFails(t *testing.T) {
 	t.Parallel()
 
@@ -438,19 +412,17 @@ func TestCeleryDispatcher_Dispatch_NoRPUSH_WhenEnvelopeFails(t *testing.T) {
 
 	err := d.Dispatch(context.Background(), fixedWorkflowID, fixedDocumentID)
 
-	assert.Error(t, err)
-	// GREEN 이후: RPUSH 0건 + ErrEnvelopeSerializationFailed
-	// assert.ErrorIs(t, err, ErrEnvelopeSerializationFailed)
-	// assert.Empty(t, mockRedis.rpushCalls, "직렬화 실패 시 RPUSH가 발생하지 않아야 함")
-	// RED 상태 검증
-	assert.ErrorIs(t, err, ErrNotImplemented)
+	require.Error(t, err, "envelope 직렬화 실패 시 에러를 반환해야 함")
+	// GREEN 검증: ErrEnvelopeSerializationFailed 래핑 + RPUSH 0건
+	assert.ErrorIs(t, err, ErrEnvelopeSerializationFailed,
+		"직렬화 실패 에러가 체인에 포함되어야 함 (AC-CTRL-005-3)")
+	assert.Empty(t, mockRedis.rpushCalls, "직렬화 실패 시 RPUSH가 발생하지 않아야 함")
 }
 
 // --- AC-CTRL-005-1 골든 파일 구조 검증 ---
 
 // TestCeleryEnvelopeGoldenFile_StructureValid
 // 골든 파일 자체가 유효한 JSON이며 필수 키를 보유해야 함
-// 이 테스트는 골든 파일 상태를 검증하는 것이므로 RED/GREEN 모두 통과 가능
 func TestCeleryEnvelopeGoldenFile_StructureValid(t *testing.T) {
 	t.Parallel()
 
@@ -485,7 +457,6 @@ func TestCeleryEnvelopeGoldenFile_StructureValid(t *testing.T) {
 
 // TestCeleryEnvelopeGoldenFile_KeysAlphabeticalOrder
 // 골든 파일의 key 순서가 Go encoding/json의 알파벳 정렬과 일치해야 함
-// 이 테스트는 골든 파일 정합성 검증이므로 RED/GREEN 모두 통과 가능
 func TestCeleryEnvelopeGoldenFile_KeysAlphabeticalOrder(t *testing.T) {
 	t.Parallel()
 
@@ -519,7 +490,6 @@ func TestCeleryEnvelopeGoldenFile_KeysAlphabeticalOrder(t *testing.T) {
 // --- AC-CTRL-005-4: Dispatch 레이턴시 벤치마크 ---
 
 // BenchmarkDispatchLatency dispatch 레이턴시 p99 < 100ms 벤치마크 (AC-CTRL-005-4)
-// RED: ErrNotImplemented 반환 → 벤치마크 자체는 실행 가능하지만 모든 호출이 에러
 // GREEN 이후: 실제 레이턴시 측정 가능
 func BenchmarkDispatchLatency(b *testing.B) {
 	mockRedis := &mockRedisClient{}
@@ -539,8 +509,7 @@ func BenchmarkDispatchLatency(b *testing.B) {
 
 // TestCeleryDispatcher_Latency_P99Under100ms dispatch p99 < 100ms 검증 (단위 테스트 버전)
 // 10 goroutine × 100 iteration = 1000회 dispatch, p99 측정
-// RED: ErrNotImplemented는 빠르게 반환되므로 레이턴시 기준은 통과 가능
-// GREEN 이후: 실제 Redis RPUSH 포함 레이턴시 검증
+// GREEN: 실제 Redis mock RPUSH 포함 레이턴시 검증
 func TestCeleryDispatcher_Latency_P99Under100ms(t *testing.T) {
 	if testing.Short() {
 		t.Skip("단기 테스트 모드에서는 레이턴시 테스트 건너뜀")
@@ -592,11 +561,10 @@ func TestCeleryDispatcher_Latency_P99Under100ms(t *testing.T) {
 	close(durationCh)
 	<-done
 
-	// 에러 수집 (RED: 모두 ErrNotImplemented)
+	// GREEN: 모든 dispatch가 성공해야 함
 	close(errCh)
 	for err := range errCh {
-		assert.ErrorIs(t, err, ErrNotImplemented,
-			"RED 단계: 모든 dispatch가 ErrNotImplemented여야 함")
+		assert.NoError(t, err, "GREEN 단계: 모든 dispatch가 성공해야 함 (mock Redis)")
 	}
 
 	// p99 계산
@@ -608,8 +576,7 @@ func TestCeleryDispatcher_Latency_P99Under100ms(t *testing.T) {
 	}
 	p99 := durations[p99Idx]
 
-	// RED 단계: ErrNotImplemented는 즉시 반환이므로 p99 < 1ms 예상 (100ms 기준 충분히 통과)
-	// GREEN 이후: 실제 Redis RPUSH 포함 p99 < 100ms 검증
+	// GREEN: 실제 Redis mock RPUSH 포함 p99 < 100ms 검증
 	assert.Less(t, p99, 100*time.Millisecond,
 		"dispatch p99 레이턴시가 100ms 미만이어야 함 (현재: %v)", p99)
 }
