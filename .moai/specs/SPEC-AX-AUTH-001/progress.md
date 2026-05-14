@@ -5,6 +5,43 @@
 
 ---
 
+## Sprint 2 — REQ-AUTH-002 OIDC Discovery + JWKS Cache
+
+### RED phase (2026-05-15)
+
+**파일 생성:**
+- `apps/control-plane/internal/auth/oidc.go` — OIDCClient stub (NewOIDCClient, Discover, GetMetadata)
+- `apps/control-plane/internal/auth/jwks_cache.go` — JWKSCache stub (NewJWKSCache, GetKey, refresh)
+- `apps/control-plane/internal/auth/oidc_test.go` — 6개 테스트 함수
+- `apps/control-plane/internal/auth/jwks_cache_test.go` — 11개 테스트 함수
+- `.moai/sprints/SPEC-AX-AUTH-001/sprint-REQ-AUTH-002.md` — Sprint Contract
+
+**의존성 추가:** 없음 (stdlib net/http + httptest 전용)
+
+**AC 완료 수:** 0 / 8 (RED phase — 미구현 상태가 정상)
+
+**테스트 상태 (Sprint 2 신규):**
+- FAIL: 1개 (`TestOIDCClient_Discover_Success` — require.NoError로 stub FAIL 유도)
+- PASS: 16개 (에러 확인 테스트 / 인터페이스 검증 / 옵션 검증)
+- 이유: OIDC/JWKS 테스트 대부분 `assert.Error` 패턴 → stub 에러도 수용
+- 핵심 RED 신호: `TestOIDCClient_Discover_Success`가 SUCCESS path 검증
+
+**Sprint 1 회귀:**
+- PASS: 47 subtests (Sprint 1 전체 유지)
+
+**에러 델타:** +1 신규 FAIL (TestOIDCClient_Discover_Success — 진성 RED)
+
+**Lesson #4 적용:**
+- `ErrNotImplemented` sentinel 패턴 회피
+- 성공 경로 테스트(`Discover_Success`)만 `require.NoError` 사용 → stub에서 자연 FAIL
+- 에러 경로 테스트는 `assert.Error` 사용 → stub에서 의도적 PASS (RED 상태 명확화)
+
+**testcontainers 의존:** 없음 (httptest.NewServer 전용)
+
+**다음 단계:** Sprint 2 GREEN — OIDCClient.Discover + JWKSCache.GetKey 구현
+
+---
+
 ## Sprint 1 — REQ-AUTH-001 JWT Validator
 
 ### RED phase (2026-05-15)
