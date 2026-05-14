@@ -157,6 +157,47 @@ func (r *Recorder) RecordTransitionRejected(ctx context.Context, tx AuditTx, wor
 	return tx.InsertAuditLog(ctx, e)
 }
 
+// RecordTransitionedToRunning WORKFLOW_TRANSITIONED_TO_RUNNING 감사 이벤트를 기록
+// AC-CTRL-001-1: PENDING → RUNNING 전이 성공 시 호출
+func (r *Recorder) RecordTransitionedToRunning(ctx context.Context, tx AuditTx, workflowID, userID string) error {
+	details, err := json.Marshal(map[string]string{
+		"from": "PENDING",
+		"to":   "RUNNING",
+	})
+	if err != nil {
+		return fmt.Errorf("recorder: marshal transition details: %w", err)
+	}
+	e := &Event{
+		Timestamp:    time.Now().UTC(),
+		Action:       ActionWorkflowTransitionedToRunning,
+		ResourceType: "workflow",
+		ResourceID:   parseResourceID(workflowID),
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordFailedCallback WORKFLOW_FAILED_CALLBACK 감사 이벤트를 기록
+// RUNNING → FAILED 전이 시 호출 (콜백 처리 실패)
+func (r *Recorder) RecordFailedCallback(ctx context.Context, tx AuditTx, workflowID, reason, userID string) error {
+	details, err := json.Marshal(map[string]string{
+		"reason": reason,
+	})
+	if err != nil {
+		return fmt.Errorf("recorder: marshal callback failure details: %w", err)
+	}
+	e := &Event{
+		Timestamp:    time.Now().UTC(),
+		Action:       ActionWorkflowFailedCallback,
+		ResourceType: "workflow",
+		ResourceID:   parseResourceID(workflowID),
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
 // RecordCreateCancelled WORKFLOW_CREATE_CANCELLED 감사 이벤트를 기록
 func (r *Recorder) RecordCreateCancelled(ctx context.Context, tx AuditTx, workflowID, userID string) error {
 	e := &Event{

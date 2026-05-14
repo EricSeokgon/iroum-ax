@@ -83,6 +83,7 @@ func (s *FakeStore) BeginTx(_ context.Context) (WorkflowTx, error) {
 		pendingWorkflows:     make([]*types.Workflow, 0),
 		pendingAuditLogs:     make([]*audit.Event, 0),
 		pendingUpdates:       make(map[string]types.WorkflowState),
+		pendingResultUpdates: make(map[string][]byte),
 		FailOnAuditInsert:    failAudit,
 		FailOnWorkflowInsert: failWorkflow,
 		FailOnGetWorkflow:    failGet,
@@ -97,6 +98,8 @@ type FakeTx struct {
 	store *FakeStore
 	// pendingUpdates 아직 commit되지 않은 상태 갱신 버퍼 (id → newState)
 	pendingUpdates map[string]types.WorkflowState
+	// pendingResultUpdates 아직 commit되지 않은 resultJSON 갱신 버퍼 (id → resultJSON)
+	pendingResultUpdates map[string][]byte
 	// pendingWorkflows 아직 commit되지 않은 워크플로우 행 버퍼
 	pendingWorkflows []*types.Workflow
 	// pendingAuditLogs 아직 commit되지 않은 감사 이벤트 버퍼
@@ -171,6 +174,12 @@ func (tx *FakeTx) Commit(_ context.Context) error {
 			wf.State = newState
 		}
 	}
+	// pendingResultUpdates를 store의 Workflows에 반영
+	for id, resultJSON := range tx.pendingResultUpdates {
+		if wf, ok := tx.store.Workflows[id]; ok {
+			wf.ResultJSON = resultJSON
+		}
+	}
 	return nil
 }
 
@@ -185,6 +194,16 @@ func (tx *FakeTx) Rollback(_ context.Context) error {
 	tx.pendingWorkflows = nil
 	tx.pendingAuditLogs = nil
 	tx.pendingUpdates = make(map[string]types.WorkflowState)
+	tx.pendingResultUpdates = make(map[string][]byte)
+	return nil
+}
+
+// UpdateWorkflowResult 트랜잭션 버퍼에 resultJSON 갱신을 추가
+// Complete 전이 시 RUNNING → COMPLETED와 함께 결과를 원자적으로 저장
+func (tx *FakeTx) UpdateWorkflowResult(_ context.Context, id string, resultJSON []byte) error {
+	buf := make([]byte, len(resultJSON))
+	copy(buf, resultJSON)
+	tx.pendingResultUpdates[id] = buf
 	return nil
 }
 

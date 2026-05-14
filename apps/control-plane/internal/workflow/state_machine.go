@@ -1,12 +1,15 @@
 // state_machine.go — 워크플로우 상태 머신
-// Sprint 2 RED: Start/Complete/Fail/CurrentState 시그니처 정의, 구현은 GREEN 단계
-// Sprint 0 stub을 대체하며 TxCoordinator와 통합된 상태 전이 제어 흐름을 제공
+// Sprint 2 GREEN: Start/Complete/Fail/CurrentState 실제 구현
+// TxCoordinator와 통합된 상태 전이 제어 흐름 제공
 package workflow
 
 import (
 	"context"
-	"errors"
+	"fmt"
+	"sync"
 
+	cperrors "github.com/ircp/iroum-ax/apps/control-plane/internal/errors"
+	"github.com/ircp/iroum-ax/apps/control-plane/internal/types"
 	"go.uber.org/zap"
 )
 
@@ -39,12 +42,6 @@ type Workflow struct {
 	ResultJSON []byte     `json:"result_json,omitempty"`
 }
 
-// errStateMachineNotImplemented Sprint 2 GREEN 이전 모든 StateMachine 메서드가 반환하는 sentinel
-// RED phase에서 테스트가 실패해야 하므로 이 에러로 실패를 유도
-//
-// @MX:TODO: [AUTO] Start/Complete/Fail/CurrentState GREEN 구현 시 이 에러 제거
-var errStateMachineNotImplemented = errors.New("state machine: not implemented — sprint 2 green phase required")
-
 // StateMachine 워크플로우 상태 전이 관리자
 // TxCoordinator를 통해 상태 변경과 감사 이벤트를 원자적으로 처리
 //
@@ -55,6 +52,10 @@ type StateMachine struct {
 	coordinator *TxCoordinator
 	// logger 구조화 zap 로거
 	logger *zap.Logger
+	// mu 동시 전이 직렬화 — AC-CTRL-001-4 concurrent test 요건
+	// GetWorkflow → 검증 → Commit 사이의 TOCTOU 레이스를 방지
+	// 포인터 필드(16B) 뒤에 배치하여 fieldalignment 패딩 최소화
+	mu sync.Mutex
 }
 
 // NewStateMachine StateMachine 인스턴스를 생성
@@ -71,36 +72,149 @@ func NewStateMachine(coordinator *TxCoordinator, logger *zap.Logger) *StateMachi
 // 실패 조건: 현재 상태가 PENDING이 아니면 ErrInvalidTransition 반환
 // 전이 성공 시: UpdateWorkflowState + WORKFLOW_TRANSITIONED_TO_RUNNING audit INSERT → Commit
 //
-// @MX:TODO: [AUTO] Sprint 2 GREEN에서 구현 필요
+// @MX:WARN: [AUTO] mu.Lock()으로 전체 전이를 직렬화하여 AC-CTRL-001-4 동시성 불변 보장
+// @MX:REASON: FakeTx.GetWorkflow와 Commit 사이의 TOCTOU 레이스 방지
 func (sm *StateMachine) Start(ctx context.Context, workflowID string) error {
-	return errStateMachineNotImplemented
+	// 동시 호출 직렬화 — FakeTx(및 실제 pgx)에서 TOCTOU 레이스 방지
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	tx, err := sm.coordinator.store.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("state machine start: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }() //nolint:errcheck
+
+	// 현재 상태 조회
+	wf, err := tx.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return fmt.Errorf("state machine start: get workflow: %w", err)
+	}
+
+	// 전이 유효성 검사
+	if !types.IsValidTransition(wf.State, types.WorkflowStateRunning) {
+		return fmt.Errorf("state machine start: %w", cperrors.ErrInvalidTransition)
+	}
+
+	// 상태 갱신
+	if err = tx.UpdateWorkflowState(ctx, workflowID, types.WorkflowStateRunning); err != nil {
+		return fmt.Errorf("state machine start: update state: %w", err)
+	}
+
+	// 감사 이벤트 기록
+	if err = sm.coordinator.recorder.RecordTransitionedToRunning(ctx, tx, workflowID, ""); err != nil {
+		return fmt.Errorf("state machine start: record audit: %w", err)
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("state machine start: commit: %w", err)
+	}
+	return nil
 }
 
 // Complete RUNNING → COMPLETED 상태 전이를 수행
 // resultJSON: Python worker 반환 결과 (JSONB 형태로 workflows 테이블에 저장)
 // 실패 조건: 현재 상태가 RUNNING이 아니면 ErrInvalidTransition 반환
-//
-// @MX:TODO: [AUTO] Sprint 2 GREEN에서 구현 필요
 func (sm *StateMachine) Complete(ctx context.Context, workflowID string, resultJSON []byte) error {
-	return errStateMachineNotImplemented
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	tx, err := sm.coordinator.store.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("state machine complete: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }() //nolint:errcheck
+
+	wf, err := tx.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return fmt.Errorf("state machine complete: get workflow: %w", err)
+	}
+
+	if !types.IsValidTransition(wf.State, types.WorkflowStateCompleted) {
+		return fmt.Errorf("state machine complete: %w", cperrors.ErrInvalidTransition)
+	}
+
+	if err = tx.UpdateWorkflowState(ctx, workflowID, types.WorkflowStateCompleted); err != nil {
+		return fmt.Errorf("state machine complete: update state: %w", err)
+	}
+
+	if err = tx.UpdateWorkflowResult(ctx, workflowID, resultJSON); err != nil {
+		return fmt.Errorf("state machine complete: update result: %w", err)
+	}
+
+	if err = sm.coordinator.recorder.RecordCompleted(ctx, tx, workflowID, ""); err != nil {
+		return fmt.Errorf("state machine complete: record audit: %w", err)
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("state machine complete: commit: %w", err)
+	}
+	return nil
 }
 
 // Fail PENDING 또는 RUNNING → FAILED 상태 전이를 수행
 // reason: 실패 사유 문자열 (audit details에 포함)
 // 실패 조건: 이미 종료 상태(COMPLETED, FAILED)이면 ErrInvalidTransition 반환
-//
-// @MX:TODO: [AUTO] Sprint 2 GREEN에서 구현 필요
 func (sm *StateMachine) Fail(ctx context.Context, workflowID string, reason string) error {
-	return errStateMachineNotImplemented
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	tx, err := sm.coordinator.store.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("state machine fail: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }() //nolint:errcheck
+
+	wf, err := tx.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return fmt.Errorf("state machine fail: get workflow: %w", err)
+	}
+
+	if !types.IsValidTransition(wf.State, types.WorkflowStateFailed) {
+		return fmt.Errorf("state machine fail: %w", cperrors.ErrInvalidTransition)
+	}
+
+	if err = tx.UpdateWorkflowState(ctx, workflowID, types.WorkflowStateFailed); err != nil {
+		return fmt.Errorf("state machine fail: update state: %w", err)
+	}
+
+	// 현재 상태에 따라 감사 액션 분기
+	// PENDING → FAILED: dispatch 실패, RUNNING → FAILED: callback 실패
+	switch wf.State {
+	case types.WorkflowStatePending:
+		if err = sm.coordinator.recorder.RecordFailedDispatch(ctx, tx, workflowID, ""); err != nil {
+			return fmt.Errorf("state machine fail: record dispatch audit: %w", err)
+		}
+	default:
+		// WorkflowStateRunning → FAILED
+		if err = sm.coordinator.recorder.RecordFailedCallback(ctx, tx, workflowID, reason, ""); err != nil {
+			return fmt.Errorf("state machine fail: record callback audit: %w", err)
+		}
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("state machine fail: commit: %w", err)
+	}
+	return nil
 }
 
 // CurrentState 현재 워크플로우 상태를 조회
-// 워크플로우가 없으면 ErrWorkflowNotFound를 래핑하여 반환
+// 워크플로우가 없으면 에러를 반환
 // Sprint 3에서 SELECT FOR UPDATE로 교체될 예정이나 Sprint 2에서는 단순 조회
-//
-// @MX:TODO: [AUTO] Sprint 2 GREEN에서 구현 필요, Sprint 3에서 SELECT FOR UPDATE로 전환
 func (sm *StateMachine) CurrentState(ctx context.Context, workflowID string) (Status, error) {
-	return "", errStateMachineNotImplemented
+	tx, err := sm.coordinator.store.BeginTx(ctx)
+	if err != nil {
+		return "", fmt.Errorf("state machine current state: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }() //nolint:errcheck
+
+	wf, err := tx.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return "", fmt.Errorf("state machine current state: get workflow: %w", err)
+	}
+
+	// types.WorkflowState → Status 변환 (Sprint 0 호환 타입)
+	return Status(wf.State), nil
 }
 
 // Transition Sprint 0 호환 메서드 — 테스트에서 types 레이어 없이 사용하는 경우 대비
