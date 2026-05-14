@@ -1,5 +1,15 @@
 # iroum-ax
 
+[![CI](https://github.com/EricSeokgon/iroum-ax/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/EricSeokgon/iroum-ax/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/EricSeokgon/iroum-ax/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/EricSeokgon/iroum-ax/actions/workflows/codeql.yml)
+[![License: Private](https://img.shields.io/badge/License-Private-red.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11-blue.svg)](pyproject.toml)
+[![Go](https://img.shields.io/badge/go-1.22-00ADD8.svg)](go.mod)
+[![Tests](https://img.shields.io/badge/tests-272_passing-brightgreen.svg)](#)
+[![SPEC](https://img.shields.io/badge/SPECs-3_(2_GREEN_+_1_Plan)-purple.svg)](#)
+
+> 한국 공공기관 경영평가 보고서 자동화 AI 플랫폼 — KEPCO E&C anchor
+
 한국 공공기관 경영평가 AI 플랫폼 — 안전보건 PoC Walking Skeleton
 
 KEPCO E&C anchor 고객 대상 경영평가 자동화 플랫폼. HWP 문서 수집부터 Gap 추천까지 5개 MVP 기능을 단일 워크플로우로 통과시키는 E2E 슬라이스.
@@ -128,6 +138,20 @@ make docker-build # Docker 이미지 빌드
 | - | SPEC-AX-EXPANDED-001 | 다중 평가항목 (안전보건 → 500개 전체) |
 | Phase 3 | SPEC-AX-{ESG,AUDIT,LICENSE}-001 | 인접 도메인 확장 |
 | Phase 4+ | SPEC-AX-FINTECH-001 | 금융권 규제 보고서 (조건: 공공 anchor 성공 3+ 확보) |
+
+---
+
+## 아키텍처 결정 기록 (ADR)
+
+주요 설계 결정은 [docs/adr/](docs/adr/)에 영구 보존됩니다.
+
+핵심 ADR:
+- [0002 자체 호스팅 LLM + 망분리 정합](docs/adr/0002-self-hosted-llm-data-sovereignty.md)
+- [0003 abstain 3-way softmax 분류](docs/adr/0003-abstain-3way-softmax-classifier.md)
+- [0004 Celery-from-Go Redis-direct envelope](docs/adr/0004-celery-from-go-redis-direct.md)
+- [0006 Keycloak OIDC provider 선정](docs/adr/0006-keycloak-oidc-provider.md)
+
+모든 ADR 목록은 [docs/adr/README.md](docs/adr/README.md)를 참조하세요.
 
 ---
 
