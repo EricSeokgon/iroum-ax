@@ -3,8 +3,8 @@
 Sprint 6 RED phase: GapItem, ContentSuggestion, RankedSuggestion 모델 스텁.
 GREEN phase에서 완전한 검증 로직이 추가된다.
 
-# @MX:ANCHOR: [AUTO] GapItem — GapAnalyzer/ContentSuggester/Prioritizer 전반에서 소비되는 핵심 파이프라인 모델
-# @MX:REASON: GapAnalyzer.analyze, ContentSuggester.suggest, Prioritizer.prioritize, 통합 테스트가 모두 이 모델을 반환/소비함
+# @MX:ANCHOR: [AUTO] GapItem — Gap 파이프라인 핵심 모델
+# @MX:REASON: analyze/suggest/prioritize 및 통합 테스트 모두 이 모델을 소비함
 # @MX:SPEC: SPEC-AX-001 REQ-AX-005-E1 / AC-005-1 / AC-005-2 / AC-005-3
 """
 from __future__ import annotations
