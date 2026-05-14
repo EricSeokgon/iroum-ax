@@ -169,11 +169,48 @@
 
 ---
 
+---
+
+## Sprint 5: REQ-CTRL-003 REST API
+
+| 날짜 | 단계 | AC 완료 | 에러 Delta | 상태 |
+|------|------|---------|-----------|------|
+| 2026-05-14 | RED | 0/5 (AC-CTRL-003-1/2/3/3b/4) | +0 | COMPLETE |
+
+**Sprint 5 RED 산출물**:
+- `.moai/sprints/SPEC-AX-CTRL-001/sprint-REQ-CTRL-003.md` — Sprint Contract (Functionality + UX 우선)
+- `apps/control-plane/internal/server/rest_handler.go` — RESTHandler stub (모든 핸들러 501 반환)
+- `apps/control-plane/internal/server/rest_handler_test.go` — 12개 RED 테스트
+
+**Sprint 5 목표 AC** (5개):
+- [ ] AC-CTRL-003-1 (POST → 201 + Location + JSON)
+- [ ] AC-CTRL-003-2 (GET → 200/404/400)
+- [ ] AC-CTRL-003-3 (LIST → 200 + array)
+- [ ] AC-CTRL-003-3b (invalid limit → 400)
+- [ ] AC-CTRL-003-4 (startup < 2s)
+
+**실제 테스트 수**: 12개 신규 (rest_handler_test.go)
+**RED 상태 확인**:
+- `go build ./apps/control-plane/...` → PASS (컴파일 오류 없음)
+- `go vet ./apps/control-plane/...` → PASS (0 오류)
+- `golangci-lint run ./apps/control-plane/...` → PASS (0 오류)
+- `go test ./apps/control-plane/internal/server/...`:
+  - 12 FAIL (새 REST 테스트 — 501 Not Implemented 반환, 정상 RED)
+  - 12 PASS (Sprint 4 gRPC 테스트 유지 — 회귀 없음)
+
+**구현 방식**: Option A (직접 net/http, grpc-gateway codegen 없음)
+- Go 1.22+ `http.ServeMux` 패턴 (`{id}` 와일드카드 내장 지원)
+- `encoding/json` 직렬화
+- `httptest.NewServer` 기반 in-process 테스트
+
+**에러 Delta**: +0 (LSP baseline 변동 없음)
+
+---
+
 ## 향후 Sprint
 
 | Sprint | REQ | 예상 시작 |
 |--------|-----|---------|
-| Sprint 4 GREEN | REQ-CTRL-002 gRPC Server 비즈니스 로직 구현 | Sprint 4 RED 완료 후 |
-| Sprint 5 | REQ-CTRL-003 REST API (gRPC-Gateway) | Sprint 4 완료 후 |
+| Sprint 5 GREEN | REQ-CTRL-003 REST API 비즈니스 로직 구현 | Sprint 5 RED 완료 후 |
 | Sprint 6 | REQ-CTRL-005 Celery Dispatch (miniredis) | Sprint 5 완료 후 |
 | Sprint 7 | E2E Integration (docker-compose) | Sprint 6 완료 후 |
