@@ -164,7 +164,94 @@ GREEN phase 통과 기준:
 
 ---
 
-## 다음 단계: Sprint 2 GREEN Phase
+## Sprint 3: REQ-AX-002 — RED Phase COMPLETE
+
+- 진입일: 2026-05-14
+- 단계: RED (실패 테스트 작성 완료)
+
+### RED Phase 결과
+
+| 지표 | 값 |
+|------|---|
+| 수집된 테스트 수 | 35 (5파일) |
+| 실패 테스트 수 | 35 |
+| 통과 테스트 수 | 0 |
+| 실패 원인 | ModuleNotFoundError (pipelines.mapping.* 미구현) |
+| Sprint 1+2 회귀 | 없음 (54/54 통과 유지) |
+| Coverage | 0% (구현 없음, 예상됨) |
+| RED 상태 확인 | YES |
+
+### 생성된 테스트 파일
+
+| 파일 | AC | 테스트 수 |
+|------|----|----------|
+| `tests/unit/test_req_ax_002_criterion_parser.py` | AC-002-1, AC-002-3, AC-002-5 | 7 |
+| `tests/unit/test_req_ax_002_embedding_service.py` | 임베딩 계약 (vec dim 768, norm > 0, 한자) | 5 |
+| `tests/unit/test_req_ax_002_vector_store.py` | AC-002-4, AC-002-6, upsert/query | 10 |
+| `tests/unit/test_req_ax_002_retriever.py` | AC-002-3, AC-002-4, AC-002-5, AC-002-6 | 10 |
+| `tests/unit/test_req_ax_002_integration.py` | AC-002-1 통합 파이프라인 | 3 |
+
+### pytest 출력 요약
+
+```
+============ 35 failed, 54 passed, 4 deselected, 1 warning in 0.36s ============
+```
+
+- Sprint 3 테스트 35개: 전부 FAILED (RED 상태 확인)
+- Sprint 1+2 테스트 54개: 전부 PASSED (회귀 없음)
+
+### 추가 생성/수정 파일
+
+| 파일 | 내용 |
+|------|------|
+| `.moai/sprints/SPEC-AX-001/sprint-REQ-AX-002.md` | Sprint Contract (thorough harness) |
+| `pkg/models/criterion.py` | Criterion, CriterionMatch, ColdStartResponse 스텁 확장 |
+
+### Sprint 3 AC 상태
+
+| AC | 설명 | 상태 |
+|----|------|------|
+| AC-002-1 | top-3 검색, relevance > 0.7, 계층 포함 | RED |
+| AC-002-2 | insufficient_context 명시 상태 | RED |
+| AC-002-3 | 항목→지표→배점 계층 보존 + 한자/한글 정규화 | RED |
+| AC-002-4 | HNSW 재구축 중 큐잉 또는 503 | RED |
+| AC-002-5 | 한자 정규화 실패 graceful (no 500, confidence × 0.8) | RED |
+| AC-002-6 | cold-start 명시 응답 (no silent empty / no 500) | RED |
+
+- 누적 AC 완료: 0 / 24
+- 직전 대비 신규 AC 통과: 0 (RED phase — 예상됨)
+- LSP error delta: +0 (테스트/스텁 파일만 추가, 구현 없음)
+- Coverage delta: 0% → 0% (구현 없음)
+
+### Re-planning Gate 체크
+
+- 연속 zero AC 카운터: 3 (RED phase 세 번째 entry — 정상, RED phase는 zero AC가 정상)
+- Stagnation: NO (RED phase 완료, GREEN 진입 예정)
+
+### 모의 전략 결정
+
+| 컴포넌트 | 단위 테스트 전략 | 통합 테스트 전략 |
+|---------|--------------|---------------|
+| ko-sroberta-multitask | `unittest.mock.patch("...SentenceTransformer")` | 동일 |
+| pgvector DB 연결 | `MagicMock()` (mock_pgvector_conn) | testcontainers PostgreSQL+pgvector |
+| IndexNotBootstrappedError | `Exception("index_not_bootstrapped: ...")` 로 대체 (GREEN에서 실제 클래스) | 실제 예외 클래스 사용 |
+
+---
+
+## 다음 단계: Sprint 3 GREEN Phase
+
+GREEN phase에서 구현할 모듈:
+1. `pkg/errors/custom_errors.py` — `IndexNotBootstrappedError`, `IndexRebuildingError` 예외 클래스 추가
+2. `pipelines/mapping/criterion_parser.py` — `CriterionParser` (평가편람 PDF 파싱, hanja 정규화)
+3. `pipelines/mapping/embedding_service.py` — `EmbeddingService` (ko-sroberta-multitask wrapping)
+4. `pipelines/mapping/vector_store.py` — `VectorStore` (pgvector HNSW, FakeVectorStore 포함)
+5. `pipelines/mapping/retriever.py` — `Retriever` (embed + query 오케스트레이션, cold-start 처리)
+
+GREEN phase 통과 기준:
+- 35개 Sprint 3 테스트 모두 PASS
+- 54개 Sprint 1+2 테스트 회귀 없음 유지
+- LSP errors=0, type_errors=0, lint_errors=0
+- Coverage >= 85%
 
 GREEN phase에서 구현할 모듈:
 1. `pkg/models/document.py` — `ParsedDocument`, `Table`, `DocumentMetadata` Pydantic 모델 추가
