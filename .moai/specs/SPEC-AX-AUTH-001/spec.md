@@ -1,6 +1,6 @@
 ---
 id: SPEC-AX-AUTH-001
-version: 0.1.0
+version: 0.1.1
 status: draft
 created: 2026-05-14
 updated: 2026-05-14
@@ -11,6 +11,7 @@ issue_number: 0
 
 # HISTORY
 
+- 0.1.1 (2026-05-14): plan-auditor iter 1 PASS 0.88 + evaluator-active CONFIRM 0.782 후속 보정. SF-1 (REQ-AUTH-001-E1에 `iss` 클레임 검증 추가, RFC 7519 §4.1.1 + OWASP JWT cheat sheet 요구) + SF-2 (AC-AUTH-001-alg-cross-check 신규 — JWKS key 타입과 token `alg` 헤더 cross-check, RSA key + ES256 claim 변형 검증) + D1 (§2.1 affected files: `internal/scheduler/dispatcher.go` → `internal/scheduler/celery_envelope.go` — Celery envelope builder boundary 정합, plan.md S6 + research.md Decision 3과 cross-doc 일관성). SF-3/D2~D6는 비차단 advisory로 Sprint S1 RED 시작 시 함께 처리 예정. (작성자: ircp)
 - 0.1.0 (2026-05-14): SPEC-AX-001 + SPEC-AX-CTRL-001 후속. 두 선행 SPEC이 `cli-anonymous` 폴백을 sandbox 정합으로 도입한 상태에서, KEPCO E&C 운영 배포 전제(감사원 추적성, PISA/PIPA 준수)를 위한 SSO/JWT 인증 + 기초 RBAC 도입. Composite domain: AX + AUTH. Keycloak 24.x LTS를 OIDC provider로 선정(망분리 정합 + 한국 운영 사례 다수). 외부 OAuth(Google/Microsoft)·MFA·SAML·전자정부 표준 인증은 후속 SPEC. AuthEnabled=false 시 기존 cli-anonymous 폴백 유지(backward compatible). (작성자: ircp)
 
 > Schema note: YAML frontmatter는 SPEC-AX-001/SPEC-AX-CTRL-001과 동일하게 `.claude/skills/moai/workflows/plan.md` Phase 2의 8-field 정의(id, version, status, created, updated, author, priority, issue_number)를 따른다.
@@ -76,7 +77,7 @@ issue_number: 0
 | `apps/control-plane/internal/server/rest_handler.go` | Mux에 미들웨어 chain 적용, hardcoded `"cli-anonymous"` 제거하고 context user_id 사용 | REQ-AUTH-003 | 수정 (소규모) |
 | `apps/control-plane/internal/audit/recorder.go` | `resolveUserID` 로직 확장: AuthEnabled=true + context user_id 존재 시 그것을 사용, 아니면 기존 cli-anonymous 폴백 | REQ-AUTH-UBI-001 | 수정 (소규모) |
 | `apps/control-plane/internal/config/config.go` | OIDC 관련 필드 추가: OIDCIssuerURL, OIDCAudience, OIDCJWKSCacheTTL, RBACScopePrefix | REQ-AUTH-002 | 수정 (필드 추가) |
-| `apps/control-plane/internal/scheduler/dispatcher.go` | Celery envelope `headers.user_id` 필드 추가 — context에서 user_id 읽어 propagation | REQ-AUTH-UBI-001 | 수정 (소규모) |
+| `apps/control-plane/internal/scheduler/celery_envelope.go` | Celery envelope `headers.user_id` 필드 추가 — context에서 user_id 읽어 propagation (v0.1.1 D1 보정: envelope builder boundary는 dispatcher.go가 아닌 celery_envelope.go) | REQ-AUTH-UBI-001 | 수정 (소규모) |
 | `apps/control-plane/cmd/server/main.go` | Auth 컴포넌트 초기화 + 미들웨어 chain wiring | 전체 | 수정 |
 
 ### 2.2 Python Pipelines (`pipelines/`)
@@ -151,7 +152,7 @@ EARS 5개 패턴(Ubiquitous / Event-driven / State-driven / Optional / Unwanted)
 
 #### Event-driven
 
-- **REQ-AUTH-001-E1**: WHEN a request arrives with `Authorization: Bearer <token>` header and AuthEnabled=true, THEN the system SHALL verify the token signature using RS256 or EdDSA public keys fetched from the configured JWKS endpoint, validate `exp` / `nbf` / `iat` time claims with 30-second clock skew tolerance, validate `aud` claim equals `iroum-ax-control-plane` (Go) or `iroum-ax-pipelines` (Python), and reject the request with HTTP 401 / gRPC `UNAUTHENTICATED` if any check fails.
+- **REQ-AUTH-001-E1**: WHEN a request arrives with `Authorization: Bearer <token>` header and AuthEnabled=true, THEN the system SHALL verify the token signature using RS256 or EdDSA public keys fetched from the configured JWKS endpoint, validate `exp` / `nbf` / `iat` time claims with 30-second clock skew tolerance, validate `aud` claim equals `iroum-ax-control-plane` (Go) or `iroum-ax-pipelines` (Python), validate `iss` claim equals the configured `OIDC_ISSUER_URL` (v0.1.1 SF-1 보정: per-token issuer 검증으로 cross-realm token 재사용 공격 차단, RFC 7519 §4.1.1 + OWASP JWT cheat sheet), and reject the request with HTTP 401 / gRPC `UNAUTHENTICATED` if any check fails.
 
 - **REQ-AUTH-001-E2**: WHEN the JWKS cache TTL (default 3600 seconds) expires, THEN the system SHALL refresh the JWKS document from the OIDC provider's `/protocol/openid-connect/certs` endpoint within 5 seconds and continue accepting in-flight requests using the previous cached keys until refresh completes.
 

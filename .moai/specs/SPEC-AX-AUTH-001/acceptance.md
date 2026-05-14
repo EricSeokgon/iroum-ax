@@ -203,6 +203,39 @@ REQ 대응: REQ-AUTH-001-S1.
 - p99 < 5ms (`go test -bench`)
 - p50 < 1ms
 
+### AC-AUTH-001-iss-validation (v0.1.1 SF-1: Per-Token Issuer Validation)
+
+REQ 대응: REQ-AUTH-001-E1 (v0.1.1 추가).
+
+**Given**:
+- 토큰 발급: `iss=https://other-realm.example.com/auth/realms/other` (다른 realm)
+- 시스템 설정: `OIDC_ISSUER_URL=https://keycloak.iroum-ax.internal/realms/iroum-ax`
+- 두 토큰 모두 동일 JWKS endpoint를 (악의적으로) 공유 — Algorithm Confusion 회피 가능 시나리오
+- AuthEnabled=true
+
+**When**: VerifyToken 호출 (signature/exp/aud는 모두 PASS)
+**Then**:
+- 에러 `ErrInvalidIssuer` 반환 (signature OK, exp OK, aud OK이지만 iss 불일치)
+- audit_logs에 AUTH_REJECTED + reason=`invalid_issuer` + `expected_iss` + `actual_iss` 기록
+- HTTP 401 / gRPC UNAUTHENTICATED
+- **Why**: RFC 7519 §4.1.1 + OWASP JWT cheat sheet 요구. cross-realm token 재사용 공격 방어. coreos/go-oidc는 자동 처리하지만 SPEC 레벨 명시로 구현자 누락 가드.
+
+### AC-AUTH-001-alg-cross-check (v0.1.1 SF-2: JWKS Key Type vs Token `alg` Cross-Check)
+
+REQ 대응: REQ-AUTH-001-E1 (v0.1.1 추가, NFR 테이블 §4 정합).
+
+**Given**:
+- JWKS 응답: kid=`rsa-key-1`의 `kty=RSA` + `alg=RS256` (RSA 공개키)
+- Token 헤더: kid=`rsa-key-1` + `alg=ES256` (서명은 ES256으로 표기되었으나 실제는 RSA 키 사용 시도)
+- 정상 RSA signature with ES256 alg 표기 (Algorithm Confusion 변형)
+- AuthEnabled=true
+
+**When**: VerifyToken 호출
+**Then**:
+- 에러 `ErrAlgorithmKeyMismatch` 반환 (단순 allow-list (AC-001-5)는 통과, 그러나 key/alg cross-check에서 거부)
+- audit_logs에 AUTH_REJECTED + reason=`alg_key_type_mismatch` + `token_alg=ES256` + `jwks_alg=RS256` 기록
+- **Why**: AC-AUTH-001-5/6은 `alg` allow-list만 검증. JWKS key 타입(`kty`)과 token `alg` 일관성(RSA+RS256/RS384/RS512, EC+ES256/ES384/ES512, Ed25519+EdDSA)은 별도 검증 필요. RSA key + ES256 claim 변형은 allow-list 통과 후 실제 ECDSA 검증 routine으로 fallback 시 우회 위험.
+
 ---
 
 ## §2. REQ-AUTH-002 OIDC Provider Integration — Acceptance
