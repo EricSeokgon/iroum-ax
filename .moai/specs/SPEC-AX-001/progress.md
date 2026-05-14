@@ -357,7 +357,83 @@ GREEN phase 통과 기준:
 
 ---
 
-## 다음 단계: Sprint 5 GREEN Phase
+---
+
+## Sprint 6: REQ-AX-005 — RED Phase COMPLETE
+
+- 진입일: 2026-05-14
+- 단계: RED (실패 테스트 작성 완료)
+
+### RED Phase 결과
+
+| 지표 | 값 |
+|------|---|
+| 수집된 테스트 수 | 21 (4파일) |
+| 실패 테스트 수 | 21 |
+| 통과 테스트 수 | 0 |
+| 실패 원인 | ModuleNotFoundError (pipelines.recommendation.{gap_analyzer,content_suggester,prioritizer} 미구현) |
+| Sprint 1+2+3+4+5 회귀 | 없음 (156/156 통과 유지) |
+| Coverage | 0% (구현 없음, 예상됨) |
+| RED 상태 확인 | YES |
+
+### 생성된 파일
+
+| 파일 | AC | 테스트 수 |
+|------|----|----------|
+| `.moai/sprints/SPEC-AX-001/sprint-REQ-AX-005.md` | Sprint Contract (Priority: Completeness) | — |
+| `pkg/models/recommendation.py` | GapItem, ContentSuggestion, RankedSuggestion 스텁 | — |
+| `tests/unit/test_req_ax_005_gap_analyzer.py` | GA-1~GA-7: GapAnalyzer.analyze 계약 | 7 |
+| `tests/unit/test_req_ax_005_content_suggester.py` | CS-1~CS-5: ContentSuggester.suggest + AC-005-2/3 | 5 |
+| `tests/unit/test_req_ax_005_prioritizer.py` | PR-1~PR-7: Prioritizer.prioritize 정렬·캡·불변식 | 7 |
+| `tests/unit/test_req_ax_005_integration.py` | INT-1~INT-2: B→A 전체 파이프라인 | 2 |
+
+### pytest 출력 요약
+
+```
+============ 21 failed, 156 passed, 8 deselected, 1 warning in 1.75s ============
+```
+
+- Sprint 6 테스트 21개: 전부 FAILED (RED 상태 확인)
+- Sprint 1+2+3+4+5 테스트 156개: 전부 PASSED (회귀 없음)
+- @integration/@gpu 테스트 8개: deselected (별도 마크)
+
+### Sprint 6 AC 상태
+
+| AC | 설명 | 상태 |
+|----|------|------|
+| AC-005-1 | B→A 3-5개 우선순위 제안 + feasibility_score 내림차순 | RED |
+| AC-005-2 | 벤치마크 없음 → benchmark_not_available + 빈 리스트 (fabricated 금지) | RED |
+| AC-005-3 | criterion_id 역추적 (GapItem → ContentSuggestion → RankedSuggestion) | RED |
+
+- 누적 AC 완료: 0 / 24
+- 직전 대비 신규 AC 통과: 0 (RED phase — 예상됨)
+- LSP error delta: +0 (테스트/모델 스텁 파일만 추가, 구현 없음)
+- Coverage delta: 0% → 0% (구현 없음)
+
+### Re-planning Gate 체크
+
+- 연속 zero AC 카운터: 6 (RED phase 여섯 번째 entry — 정상, RED phase는 zero AC가 정상)
+- Stagnation: NO (RED phase 완료, GREEN 진입 예정)
+
+---
+
+## 다음 단계: Sprint 6 GREEN Phase
+
+GREEN phase에서 구현할 모듈 (Sprint 6 신규):
+1. `pipelines/recommendation/gap_analyzer.py` — `GapAnalyzer.analyze()` (현재 분포 + 벤치마크 → list[GapItem])
+2. `pipelines/recommendation/content_suggester.py` — `ContentSuggester.suggest()` (GapItem + Retriever → list[ContentSuggestion])
+3. `pipelines/recommendation/prioritizer.py` — `Prioritizer.prioritize()` (feasibility × score_delta 정렬, top_k 캡)
+4. `pkg/errors/custom_errors.py` — `BenchmarkNotAvailableError` 추가 (AC-005-2)
+
+GREEN phase 통과 기준 (Sprint 6):
+- 21개 Sprint 6 테스트 모두 PASS
+- 156개 Sprint 1+2+3+4+5 테스트 회귀 없음 유지
+- LSP errors=0, type_errors=0, lint_errors=0
+- Coverage >= 85%
+
+---
+
+## 다음 단계: Sprint 5 GREEN Phase (이전 목록 보존)
 
 GREEN phase에서 구현할 모듈 (Sprint 4 신규):
 1. `pipelines/scoring/benchmark_learner.py` — `BenchmarkLearner` 클래스 (TF-IDF + scikit-learn LogisticRegression, state machine: idle→training→ready)
