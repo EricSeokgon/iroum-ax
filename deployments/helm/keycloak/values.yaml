@@ -1,0 +1,26 @@
+# Keycloak 24.x LTS Helm values — SPEC-AX-AUTH-001 Sprint 0 stub
+# Sprint 7 GREEN에서 templates 및 세부 설정 완성 예정
+
+image:
+  repository: quay.io/keycloak/keycloak
+  tag: "24-stable"
+  pullPolicy: IfNotPresent
+
+replicas: 1
+
+# realm 이름 — iroum-ax scope prefix와 일치
+realm: iroum-ax
+
+# PoC: 단일 인스턴스. HA는 SPEC-AX-AUTH-HA-001 후속 SPEC
+# R-AUTH-005 Medium residual 수용
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# 망분리 정합: 외부 인터넷 fetch 0건
+# Keycloak은 동일 K8s namespace 내 배포 (tech.md §9.1)
+networkPolicy:
+  enabled: true
+  egressAllowSameNamespace: true
+  egressAllowExternal: false

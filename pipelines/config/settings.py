@@ -144,6 +144,33 @@ class Settings(BaseSettings):
         validation_alias="DEFAULT_USER_ID",
     )
 
+    # --- OIDC / JWT 설정 (SPEC-AX-AUTH-001 Sprint 0) ---
+    oidc_issuer_url: str = Field(
+        default="",
+        description="Keycloak realm issuer URL — 예: http://keycloak.iroum-ax.svc.cluster.local:8080/realms/iroum-ax",
+        validation_alias="OIDC_ISSUER_URL",
+    )
+    oidc_audience: str = Field(
+        default="iroum-ax-pipelines",
+        description="JWT aud 클레임 기대값 (Python 파이프라인용)",
+        validation_alias="OIDC_AUDIENCE",
+    )
+    jwks_cache_ttl_seconds: int = Field(
+        default=3600,
+        description="JWKS 캐시 hard TTL (초) — 기본 1시간",
+        validation_alias="JWKS_CACHE_TTL_SECONDS",
+    )
+    jwks_stale_max_age_seconds: int = Field(
+        default=14400,
+        description="JWKS fetch 실패 시 stale 캐시 최대 허용 기간 (초) — 기본 4시간",
+        validation_alias="JWKS_STALE_MAX_AGE_SECONDS",
+    )
+    clock_skew_seconds: int = Field(
+        default=30,
+        description="JWT 시간 클레임 검증 허용 오차 (초) — OAuth 2.0 BCP RFC 9700 권장치",
+        validation_alias="CLOCK_SKEW_SECONDS",
+    )
+
     # --- 로깅 ---
     log_level: str = Field(default="INFO", description="로그 레벨")
 

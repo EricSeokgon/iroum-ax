@@ -1,0 +1,7 @@
+apiVersion: v2
+name: keycloak
+description: Keycloak 24.x LTS — iroum-ax OIDC provider (망분리 정합, 자체 호스팅)
+type: application
+version: 0.1.0
+appVersion: "24-stable"
+# SPEC-AX-AUTH-001 §2.4 — Sprint 7 GREEN에서 templates 추가 예정
