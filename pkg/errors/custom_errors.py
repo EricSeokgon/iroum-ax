@@ -26,3 +26,7 @@ class BenchmarkNotAvailableError(IroumAxBaseError):
 
 class IndexRebuildingError(IroumAxBaseError):
     """pgvector HNSW 인덱스 재구성 중 검색 요청 시 발생 (REQ-AX-002)"""
+
+
+class IndexNotBootstrappedError(IroumAxBaseError):
+    """pgvector 인덱스가 아직 초기화(부트스트랩)되지 않은 상태에서 검색 요청 시 발생 (REQ-AX-002)"""
