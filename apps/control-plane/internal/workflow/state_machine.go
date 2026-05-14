@@ -67,6 +67,11 @@ func NewStateMachine(coordinator *TxCoordinator, logger *zap.Logger) *StateMachi
 	}
 }
 
+// Coordinator 내부 TxCoordinator를 반환 (Sprint 4 gRPC 핸들러에서 ExecuteWorkflowCreate 호출 시 사용)
+func (sm *StateMachine) Coordinator() *TxCoordinator {
+	return sm.coordinator
+}
+
 // Start PENDING → RUNNING 상태 전이를 수행
 // 성공 조건: 현재 상태가 PENDING이고 IsValidTransition(PENDING, RUNNING)이 true
 // 실패 조건: 현재 상태가 PENDING이 아니면 ErrInvalidTransition 반환

@@ -6,9 +6,11 @@ package store
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/audit"
+	stderrors "github.com/ircp/iroum-ax/apps/control-plane/internal/errors"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/types"
 )
 
@@ -232,5 +234,38 @@ func (tx *FakeTx) GetWorkflow(_ context.Context, id string) (*types.Workflow, er
 var errFakeGetWorkflowFail = errors.New("fake: injected get workflow failure")
 
 // errFakeWorkflowNotFound GetWorkflow 호출 시 워크플로우가 없을 때 반환
-// errors.ErrWorkflowNotFound와 구분하기 위해 내부 sentinel 사용 (Sprint 3 pgx에서 교체)
-var errFakeWorkflowNotFound = errors.New("workflow not found")
+// gRPC 핸들러에서 errors.Is(err, stderrors.ErrWorkflowNotFound) 체크를 통과시키기 위해
+// stderrors.ErrWorkflowNotFound를 직접 사용
+var errFakeWorkflowNotFound = stderrors.ErrWorkflowNotFound
+
+// ListWorkflows 워크플로우 목록을 limit/offset 기반으로 반환
+// 반환 순서: created_at DESC (최신순)
+// WorkflowStore 인터페이스 구현 (Sprint 4 확장)
+func (s *FakeStore) ListWorkflows(_ context.Context, limit, offset int) ([]*types.Workflow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 맵에서 슬라이스로 복사
+	all := make([]*types.Workflow, 0, len(s.Workflows))
+	for _, wf := range s.Workflows {
+		wfCopy := *wf
+		all = append(all, &wfCopy)
+	}
+
+	// created_at DESC 정렬
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].CreatedAt.After(all[j].CreatedAt)
+	})
+
+	// offset 범위 초과 시 빈 슬라이스 반환
+	if offset >= len(all) {
+		return []*types.Workflow{}, nil
+	}
+	all = all[offset:]
+
+	// limit 적용
+	if limit > 0 && len(all) > limit {
+		all = all[:limit]
+	}
+	return all, nil
+}

@@ -282,8 +282,51 @@ func (t *PgWorkflowTx) Rollback(ctx context.Context) error {
 	return nil
 }
 
+// ListWorkflows 워크플로우 목록을 limit/offset 기반으로 조회
+// 반환 순서: created_at DESC (최신순)
+// WorkflowStore 인터페이스 구현 (Sprint 4 확장)
+func (s *PgWorkflowStore) ListWorkflows(ctx context.Context, limit, offset int) ([]*types.Workflow, error) {
+	const query = `
+		SELECT id, status, document_id, report_id, result_json, created_at, updated_at
+		FROM workflows
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+
+	rows, err := s.pool.Query(ctx, query, limit, offset)
+	if err != nil {
+		s.logger.Error("ListWorkflows 쿼리 실패", zap.Int("limit", limit), zap.Int("offset", offset), zap.Error(err))
+		return nil, fmt.Errorf("ListWorkflows 실패: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]*types.Workflow, 0)
+	for rows.Next() {
+		var w types.Workflow
+		var docID *uuid.UUID
+		var reportID *uuid.UUID
+		if scanErr := rows.Scan(&w.ID, &w.State, &docID, &reportID, &w.ResultJSON, &w.CreatedAt, &w.UpdatedAt); scanErr != nil {
+			return nil, fmt.Errorf("ListWorkflows scan 실패: %w", scanErr)
+		}
+		if docID != nil {
+			w.DocumentID = *docID
+		}
+		if reportID != nil {
+			w.ReportID = reportID
+		}
+		result = append(result, &w)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ListWorkflows rows 에러: %w", err)
+	}
+	return result, nil
+}
+
 // newPgWorkflowStoreWithPool 기존 풀로 PgWorkflowStore 생성 (테스트용 풀 주입)
 // testcontainers 기반 통합 테스트에서 커스텀 MaxConns 설정 후 풀을 주입할 때 사용
+// 통합 테스트(-tags=integration)에서만 호출됨 — 일반 빌드에서는 미사용으로 보임
+//
+//nolint:unused
 func newPgWorkflowStoreWithPool(pool *pgxpool.Pool, logger *zap.Logger) *PgWorkflowStore {
 	return &PgWorkflowStore{pool: pool, logger: logger}
 }

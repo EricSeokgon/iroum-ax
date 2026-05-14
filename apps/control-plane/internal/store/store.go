@@ -19,6 +19,10 @@ type WorkflowStore interface {
 	// BeginTx 새로운 데이터베이스 트랜잭션을 시작하여 반환
 	// 반환된 WorkflowTx는 반드시 Commit 또는 Rollback 중 하나로 종료해야 함
 	BeginTx(ctx context.Context) (WorkflowTx, error)
+	// ListWorkflows 워크플로우 목록을 limit/offset 기반으로 조회
+	// 반환 순서: created_at DESC (최신순)
+	// limit=0이면 기본값 100, 최대 1000 적용은 호출자(gRPC 핸들러) 책임
+	ListWorkflows(ctx context.Context, limit, offset int) ([]*types.Workflow, error)
 }
 
 // WorkflowTx 단일 데이터베이스 트랜잭션 내 쓰기 연산 인터페이스
