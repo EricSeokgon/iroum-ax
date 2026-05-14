@@ -1,0 +1,251 @@
+# Project Document Audit — Iteration 1
+
+Document type: project
+Iteration: 1/3
+Harness level: thorough
+Audit scope: `/home/sklee/moai/iroum-ax/.moai/project/{product.md,structure.md,tech.md,codemaps/overview.md}`
+Reference (read-only): `interview.md`
+
+Verdict: FAIL
+
+Overall assessment: The three primary documents (product.md, structure.md, tech.md) contain numerous violations of the "no time prediction / no calendar quarter / no emoji / no code implementation" prohibitions, a hard internal consistency contradiction (embedding dimension), fabricated quantitative KPIs not traceable to interview.md, a structurally impossible monorepo layout (Python+Go files sharing one filename), and several unstated assumptions presented as decisions. The codemaps/overview.md placeholder is acceptable and is the only document that passes cleanly.
+
+---
+
+## Defects — Prohibited Content (audit objective 4)
+
+### D1. Calendar-quarter / year time predictions
+
+- product.md:16 — "**초기 출시 목표**: 2026년 Q4 (공기업 경영평가 PoC 기반)" — calendar quarter is explicitly prohibited.
+- product.md:29 — "**수주(數週) 단위로 단축**" — "수주" is a duration prediction.
+- product.md:35 — "**2년차 로드맵**" — "2년차" is a duration label.
+- product.md:37 — Roadmap table column header "연차" — duration axis.
+- structure.md:371 — "### Phase 2 (2027 초)" — calendar year prediction.
+- structure.md:375 — "### Phase 3 (2027 중반)" — calendar year prediction.
+- structure.md:379 — "### Phase 4 (2027 후반)" — calendar year prediction.
+
+Required fix: Strip all calendar years and "Nth-year" labels from roadmap headings. Use priority labels (High/Medium/Low) and ordinal phases without dates.
+
+### D2. Emoji characters in tech.md
+
+`coding-standards.md` line "Emoji characters (except output styles)" is a hard prohibition.
+
+- tech.md:68–72 — Star glyphs ⭐⭐⭐⭐⭐ used as rating system in VLM comparison table.
+- tech.md:92–96 — Same star glyphs reused in text-LLM comparison table.
+
+Required fix: Replace ⭐ ratings with textual scale (e.g., 1–5 numeric or "강/중/약").
+
+### D3. Code-implementation blocks in planning documents
+
+The prompt explicitly bars "code implementation". Acceptable: command snippets (helm install, docker tag), schema-as-design (Protobuf manifest listing). Not acceptable: executable logic.
+
+- tech.md:128–145 — Python pipeline pseudo-code with concrete library calls.
+- tech.md:161–184 — Full Python HWP-parser usage sample (`HWPDocument`, `get_full_text()`, etc.). This is implementation, not design.
+- tech.md:245–265 — Multi-stage Dockerfile recipe (borderline; describes build pipeline rather than design).
+- tech.md:343–371 — Concrete K8s NetworkPolicy YAML manifest with field-level config — implementation, not architectural decision.
+- tech.md:381–390 — `mask_pii` Python function with regex implementation. Worst case: this is shipped code in a planning doc.
+- tech.md:400–409 — Full SQL CREATE TABLE for `audit_logs`.
+- structure.md:313–364 — Full SQL CREATE TABLE statements (acceptable as schema design but conflicts with tech.md's separate `audit_logs` definition — see D7).
+- structure.md:445–451 — Concrete Makefile target list with command bodies.
+
+Required fix: Replace executable code with prose descriptions of capability and interface. Reserve SQL/YAML samples for SPEC documents, not planning docs.
+
+---
+
+## Defects — Internal Consistency (audit objective 1)
+
+### D4. Embedding dimension contradiction
+
+- tech.md:18 and 119–124 — Embedding model is `ko-sroberta-multitask` (a 768-dim model in reality).
+- structure.md:329 — `embedding VECTOR(1536),  -- pgvector` (1536 is OpenAI ada-002 dim).
+
+These two cannot both be true. This is a critical contradiction that will break the implementation on day 1.
+
+Required fix: Decide the embedding model and propagate the matching dimension consistently. If ko-sroberta-multitask is the choice, dimension must be 768. If 1536 is intentional, the embedding model selection must be revised.
+
+### D5. Phase numbering mismatch between product.md and structure.md
+
+- product.md defines Phase 1, 2, 3 only (sections 6.1/6.2/6.3, Phase 3 = ESG/감사/면허/공문).
+- structure.md introduces Phase 4 (2027 후반) at line 379 with new modules (`analytics`, `feedback-loop`) that have no source in product.md or interview.md.
+
+Required fix: Either (a) add Phase 4 to product.md roadmap with rationale, or (b) collapse structure.md "Phase 4" content into Phase 3 / "future extensions".
+
+### D6. Proto file dangling reference
+
+- structure.md:276 — "스키마: `schemas/proto/workflow.proto`, `schemas/proto/task.proto`"
+- structure.md:160–168 — The `schemas/proto/` directory listing includes `workflow.proto` but NOT `task.proto`.
+
+Required fix: Either add `task.proto` to the proto directory listing or remove the reference from §3.2.
+
+### D7. Duplicate / inconsistent schema ownership
+
+- structure.md §5 (lines 313–365) defines `documents`, `criteria`, `reports`, `workflows`, `simulations` tables.
+- tech.md §9.3 (lines 400–409) independently defines an `audit_logs` table.
+- `.moai/project/db/` exists as a directory but is not referenced by either document. Neither document explains the relationship between embedded schemas and `db/`.
+
+Required fix: Single source of truth. Either move all schema to `.moai/project/db/` and reference it, or consolidate in one document.
+
+### D8. Control-plane Go layout contradiction
+
+- structure.md:46 — `apps/control-plane/main.go` at package root.
+- structure.md:48–50 — `apps/control-plane/cmd/server/`, `cmd/operator/` subdirectories (canonical multi-binary layout).
+
+These two patterns are mutually exclusive in Go. Either you have a single `main.go` at the module root OR you have `cmd/<binary>/main.go` per binary. Having both is a code smell that will confuse day-1 contributors.
+
+Required fix: Pick one. For a multi-binary control plane (server + K8s operator), use `cmd/server/main.go` and `cmd/operator/main.go` and remove the root `main.go`.
+
+### D9. Structurally impossible monorepo layout in `pkg/`
+
+structure.md lines 138–157 show file entries like:
+
+```
+document_ingestion_agent.py/go
+__init__.py (Python) / init.go (Go)
+custom_errors.py/go
+```
+
+A single file cannot have two extensions. This notation is either (a) shorthand the reader must decode, in which case it is unclear for new contributors (audit objective 5), or (b) literal, in which case it is non-existent. Worse, the `pkg/agents/`, `pkg/models/`, `pkg/errors/`, `pkg/logging/` claims that Python and Go modules share a directory — Go's `pkg` convention treats `pkg/` as Go-only; mixing Python files there will break `go build`.
+
+Required fix: Split into `pkg/go/` and `pkg/python/`, or define agent code per language under its own root (`apps/control-plane/internal/agents/` for Go; `pipelines/agents/` for Python). Cross-language sharing is via Protobuf schemas, not source files.
+
+---
+
+## Defects — Faithfulness to interview.md (audit objective 2)
+
+### D10. Fabricated quantitative KPIs not in interview
+
+The interview record provides qualitative goals (작성 시간 단축, 등급 시뮬레이션) but does not commit to specific numeric targets. The following numbers are introduced without trace:
+
+- product.md:62 — "경영평가 500개 항목 중 1개 선정" (interview is silent on the count).
+- product.md:105 — "초안 생성 시간 90% 단축, 검수 오류 50% 감소".
+- product.md:118 — "99.5% 가용성".
+- product.md:131 — "경영평가 등급 1단계 상향, 인건비 40% 절감".
+- product.md:148 — "OCR 정확도 95%+, 처리 속도 페이지/초 2+".
+- product.md:166 — "평가기준 검색 정확도 90%+, 관련성 스코어 0.8+".
+- product.md:183 — "등급 예측 정확도 80%+".
+- product.md:201 — "초안 생성 시간 1시간 내, 재작성율 < 20%".
+- product.md:222 — "제안 항목 실현율 70%+".
+- product.md:236 — "연간 사이클 → 단축 사이클 (목표: 95% 단축)".
+- product.md:246, 254 — "$50K-100K", "$500K-$1M" ARR projections.
+- product.md:245, 253 — "2-3개 추가 공기업 파일럿", "10-15개 공기업".
+- product.md:271 — "인건비 40% 절감 = 연 수백억 원 시장".
+
+These are not derivable from interview.md. They must be marked as **proposed targets pending PoC validation** OR removed entirely until measured.
+
+### D11. Unstated commercial assumption: LG partnership
+
+- product.md:130 — "LG AI와 기술 협력, 초안 생성 품질 테스트".
+- tech.md:83 — "한국 공공기관과 협력 관계 (기술 지원)".
+- tech.md:553 — "EXAONE 3.5: _TBD (LG AI 협력 후 공개)".
+
+The interview only states EXAONE is a candidate model. No commercial/partnership relationship with LG AI Research is recorded. Asserting "기술 협력" as fact is drift.
+
+Required fix: Rephrase to "EXAONE 3.5 채택 가설 (협력 관계 미확정)" or move to risk section.
+
+### D12. EXAONE parameter sizing inaccuracy
+
+- tech.md:92 — "EXAONE 3.5 | 7B, 32B".
+- Actual public EXAONE 3.5 sizes are 2.4B / 7.8B / 32B per LG AI Research's release.
+
+Minor but trivially verifiable. Day-1 engineer reading this will discover the discrepancy.
+
+### D13. Llama 3.2 license mislabeled
+
+- tech.md:71 — "Llama 3.2 Vision ... Llama 2 License".
+- Actual license is the LLAMA 3 COMMUNITY LICENSE.
+
+---
+
+## Defects — Risk & Decision Trace (audit objective 6)
+
+### D14. Critical TBDs not flagged as blockers
+
+Nine `_TBD_` markers exist:
+
+- product.md:14 — "개발사: _TBD (파트너사 결정 미결)" — fundamental ownership ambiguity.
+- structure.md:282 — "JWT 토큰 (공공기관 SSO 연동 _TBD)" — affects auth design.
+- tech.md:143 — "Cross-Encoder 재순위화 _TBD".
+- tech.md:203 — "GPU: A100/H100 _TBD" — bill-of-materials critical.
+- tech.md:269 — "프라이빗 레지스트리 _TBD" — deployment-blocking.
+- tech.md:416 — "AES-256 (저장, _TBD)" — security gate that section 9.4 (PISA) explicitly requires.
+- tech.md:523 — "EXAONE 3.5 업그레이드 프로세스 _TBD".
+- tech.md:553 — "EXAONE 3.5 문서 _TBD (LG AI 협력 후 공개)".
+- tech.md:582 — "EXAONE 3.5 LG 기술 협력 확인 _TBD".
+
+None of these are listed in §10 (product.md) or §13 (tech.md) risk tables as blockers requiring resolution before SPEC-AX-001 kickoff. A Day-1 engineer cannot tell which TBDs are blocking versus deferred.
+
+Required fix: Add a "Decisions pending before SPEC-AX-001" section enumerating each TBD with owner and resolution criterion.
+
+### D15. PoC vs Phase 1 KPI conflation
+
+product.md §6.1 declares "**Go-Live 준비**: 안전보건 항목 완전 자동화 | 실제 PoC 배포 및 운영" as a PoC-phase success metric. But interview.md frames the safety-health work as a PoC (proof-of-concept), not production go-live. Calling PoC completion "Go-Live" overstates commitment and is hand-wavy.
+
+Required fix: Clarify whether PoC ends in (a) a demo deliverable, (b) a pilot deployment to KEPCO E&C, or (c) full production go-live. Currently §6.1 implies all three.
+
+---
+
+## Defects — Strategic Coherence (audit objective 7)
+
+### D16. Self-hosted LLM + 망분리 + 한국어 stack — assumption depth not surfaced
+
+The "Anchor → Platform" thesis rests on:
+
+1. EXAONE 3.5 yielding good Korean-language report draft quality (assumption).
+2. Qwen2-VL handling HWP page images well enough that hwp-converter need not be perfect (assumption).
+3. Public agencies tolerating GPU procurement burden (A100/H100) on-prem.
+
+None of these are surfaced as load-bearing assumptions. The "iroum-ax 포지셔닝" claim (product.md:287) of being like Linear / Notion / Figma is rhetorical — Linear / Notion / Figma are SaaS plays with cloud-native distribution, whereas iroum-ax explicitly targets on-prem self-hosting. The analogy contradicts the deployment model.
+
+Required fix: Add explicit assumption list. Remove or restate the Linear/Notion/Figma analogy with caveat (these are horizontal cloud SaaS; iroum-ax is vertical on-prem — the only borrowed pattern is "anchor customer → platform").
+
+### D17. GTM tension not addressed: Anchor → Platform timing
+
+Interview line 132 originally suggested a "1차 12개월" anchor lock-in, then platform expansion. product.md replaces this with phase-labels (Phase 1/2/3) and quietly drops the 12-month commitment. This may be intentional (audit objective 4 forbids time predictions), but the absence of any pacing language leaves ambiguity: does Phase 2 begin only after KEPCO E&C signs renewal? After PoC technical acceptance? The strategic gate is undefined.
+
+Required fix: Define the entry gate to each phase in evidence-based terms (e.g., "Phase 2 begins when KEPCO E&C accepts the safety-health draft against the 평가편람 with documented PoC report").
+
+---
+
+## Chain-of-Verification Pass
+
+Re-read confirmed:
+
+- Every `_TBD_` instance counted (9 total) — D14 is comprehensive.
+- Every Phase reference checked across product.md and structure.md — D5 confirmed.
+- product.md and tech.md re-scanned for emoji — only ⭐ found (D2).
+- structure.md §5 DB schema cross-checked against tech.md §9.3 (audit_logs) — D7 confirmed.
+- structure.md §3 module table re-cross-checked with §2 directory tree:
+  - `mapping` module's pgvector dependency confirmed (line 266) — consistent.
+  - `console` listed at port 3000 — consistent with structure.md:78 Next.js Console.
+- product.md §7.1 market sizing ("연 수조 원") is rhetorical scaling, not a measurable claim — acceptable.
+- codemaps/overview.md is correctly a placeholder. Pass.
+
+Additional finding on second pass:
+
+### D18 (new): "Linear, Notion, Figma" comparison contradicts deployment model
+
+product.md:287 — "**iroum-ax 포지셔닝**: 수평적 플랫폼이 아닌 수직적 도메인 솔루션 (Linear, Notion, Figma 모델)".
+
+These three are cloud-native SaaS companies. iroum-ax is self-hosted on-prem K8s targeting 망분리. The "model" being borrowed is unspecified — anchor-customer strategy? PLG? Vertical depth? Without clarification, this comparison misleads.
+
+---
+
+## Top-priority fix list for revision
+
+1. Strip all calendar quarters/years and duration phrases (D1).
+2. Replace emoji ⭐ ratings with text scale (D2).
+3. Remove or relocate executable code blocks; keep schemas as design artifacts only (D3).
+4. Reconcile embedding dimension: pick one and propagate (D4).
+5. Reconcile Phase numbering between product.md and structure.md (D5).
+6. Either add `task.proto` to the schemas listing or remove the reference (D6).
+7. Consolidate SQL schema ownership (D7, decide between structure.md §5 / tech.md §9.3 / `.moai/project/db/`).
+8. Pick a single Go control-plane layout (D8); fix the `pkg/` mixed-language layout (D9).
+9. Tag every numeric KPI as "proposed, pending PoC measurement" or remove (D10).
+10. Reword LG partnership claims as hypothesis until contract exists (D11).
+11. Correct EXAONE size list and Llama 3.2 license (D12, D13).
+12. Add "Decisions pending before SPEC-AX-001" section linking each TBD to a resolution owner (D14).
+13. Disambiguate PoC vs. Go-Live (D15).
+14. Surface load-bearing assumptions and fix the misleading Linear/Notion/Figma analogy (D16, D18).
+15. Define explicit phase-entry gates rather than time-implied transitions (D17).
+
+This document is not ready for SPEC-AX-001 derivation. Revision iteration 2 is required.
