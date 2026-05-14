@@ -2,7 +2,7 @@
 # Sprint 0 스켈레톤 — 각 타겟은 placeholder + 실제 명령 주석
 # make setup → make dev-up → make test 순서로 진행
 
-.PHONY: setup build test lint format dev-up dev-down docker-build clean proto-gen db-migrate
+.PHONY: setup build test lint format dev-up dev-down docker-build clean proto-gen db-migrate demo demo-real demo-fixtures demo-clean
 
 # ============================================================
 # 기본 타겟
@@ -22,6 +22,13 @@ help:
 	@echo "  clean        - 빌드 아티팩트 정리"
 	@echo "  proto-gen    - Protobuf 코드 생성 (buf generate)"
 	@echo "  db-migrate   - 데이터베이스 마이그레이션 실행"
+	@echo ""
+	@echo "  [데모 타겟]"
+	@echo "  demo         - KEPCO PoC 5 Chapter 자동 실행 (mock 모드, ML 불필요)"
+	@echo "  demo-real    - 실제 ML 모델 사용 데모 (모델 다운로드 필요)"
+	@echo "  demo-fixtures        - 합성 픽스처 생성 (최초 1회)"
+	@echo "  demo-fixtures-force  - 합성 픽스처 강제 재생성"
+	@echo "  demo-clean   - 합성 픽스처 삭제"
 
 # ============================================================
 # 환경 설정
@@ -147,6 +154,44 @@ db-migrate:
 	psql "postgresql://ax:devpass@localhost:5432/iroum_ax" \
 		-f .moai/db/schema/initial.sql
 	@echo "[db-migrate] 완료"
+
+# ============================================================
+# 정리
+# ============================================================
+
+# ============================================================
+# 데모 타겟 (KEPCO PoC 5 Chapter 시연)
+# ============================================================
+
+## KEPCO PoC 5 Chapter 자동 실행 (mock 모드 — ML 모델 불필요)
+demo: demo-fixtures
+	@echo "[demo] iroum-ax PoC 데모 시작 (mock 모드)..."
+	@.venv/bin/python pipelines/scripts/run_demo.py --mode=mock --verbose
+
+## 실제 ML 모델 사용 데모 (Qwen 2.5 / ko-sroberta 다운로드 필요)
+demo-real: demo-fixtures
+	@echo "[demo-real] iroum-ax PoC 데모 시작 (real 모드)..."
+	@.venv/bin/python pipelines/scripts/run_demo.py --mode=real --verbose
+
+## 합성 픽스처 데이터 생성 (최초 1회 또는 --force 재생성)
+demo-fixtures:
+	@if [ ! -d tests/fixtures/synthetic/criteria ]; then \
+		echo "[demo-fixtures] 합성 픽스처 생성 중..."; \
+		.venv/bin/python pipelines/scripts/gen_synthetic_data.py; \
+	else \
+		echo "[demo-fixtures] 합성 픽스처 이미 존재 (재생성: make demo-fixtures-force)"; \
+	fi
+
+## 합성 픽스처 강제 재생성 (--force)
+demo-fixtures-force:
+	@echo "[demo-fixtures-force] 합성 픽스처 강제 재생성..."
+	@.venv/bin/python pipelines/scripts/gen_synthetic_data.py --force
+
+## 합성 픽스처 삭제
+demo-clean:
+	@echo "[demo-clean] 합성 픽스처 삭제..."
+	@rm -rf tests/fixtures/synthetic/criteria tests/fixtures/synthetic/guidelines tests/fixtures/synthetic/reports
+	@echo "[demo-clean] 완료"
 
 # ============================================================
 # 정리
