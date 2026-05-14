@@ -7,24 +7,25 @@ import (
 )
 
 // Config 서버 설정
+// 필드 순서: 문자열 먼저 (포인터 크기), int 뒤 (패딩 최소화)
 type Config struct {
+	LogLevel string // 로그 레벨
 	GRPCPort int    // gRPC 리스닝 포트 (기본: 50051)
 	RESTPort int    // REST 리스닝 포트 (기본: 8080)
-	LogLevel string // 로그 레벨
 }
 
 // Server gRPC + REST 복합 서버
 // @MX:TODO - Sprint 7에서 gRPC-Gateway v2 기반으로 구현
 type Server struct {
-	cfg    Config
 	logger *zap.Logger
+	cfg    Config
 }
 
 // New 서버 인스턴스 생성
 func New(cfg Config, logger *zap.Logger) *Server {
 	return &Server{
-		cfg:    cfg,
 		logger: logger,
+		cfg:    cfg,
 	}
 }
 

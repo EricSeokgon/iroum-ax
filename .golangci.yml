@@ -1,0 +1,48 @@
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - gosec
+    - gosimple
+    - gofmt
+    - ineffassign
+    - typecheck
+  disable-all: false
+
+linters-settings:
+  govet:
+    enable-all: true
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  staticcheck:
+    checks:
+      - all
+  gosec:
+    excludes:
+      # G304: 파일 경로 인수 허용 (설정 파일 로드에서 사용)
+      - G304
+  gofmt:
+    simplify: true
+  goimports:
+    local-prefixes: github.com/ircp/iroum-ax
+
+issues:
+  max-same-issues: 5
+  exclude-rules:
+    # 테스트 파일에서는 미사용 파라미터 및 에러 반환값 무시
+    - path: "_test\\.go"
+      linters:
+        - errcheck
+      text: "Error return value"
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+run:
+  timeout: 5m
+  # 최대 라인 길이 120자 (Python ruff line-length와 동일)

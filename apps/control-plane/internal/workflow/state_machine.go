@@ -22,7 +22,7 @@ type DocumentID string
 // @MX:TODO - Sprint 7에서 PostgreSQL store 연동 및 상태 전이 구현
 type Workflow struct {
 	ID         WorkflowID `json:"id"`
-	UserID     string     `json:"user_id"`   // 기본값: "cli-anonymous"
+	UserID     string     `json:"user_id"` // 기본값: "cli-anonymous"
 	DocumentID DocumentID `json:"document_id"`
 	Status     Status     `json:"status"`
 	ResultJSON []byte     `json:"result_json,omitempty"`

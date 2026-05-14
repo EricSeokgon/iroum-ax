@@ -12,11 +12,12 @@ const (
 )
 
 // DispatchRequest Celery 태스크 디스패치 요청
+// 필드 순서: 슬라이스(24바이트) → map(8바이트) → 문자열들 (패딩 최소화)
 type DispatchRequest struct {
-	Task    TaskName               `json:"task"`
-	Args    []interface{}          `json:"args"`
 	Kwargs  map[string]interface{} `json:"kwargs"`
+	Task    TaskName               `json:"task"`
 	QueueID string                 `json:"queue_id,omitempty"`
+	Args    []interface{}          `json:"args"`
 }
 
 // Dispatcher Celery 브로커(Redis)에 태스크를 전송하는 디스패처
