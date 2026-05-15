@@ -44,7 +44,7 @@ joblib = "^1.4.0"
 pyhwp = "^0.1b15"           # HWP OLE 파싱 (hwp-converter 대안)
 pypdf = "^4.0.0"
 pdfplumber = "^0.11.0"
-hanja = "^0.13.5"            # 한자 → 한글 변환 (REQ-AX-002 정규화)
+hanja = ">=0.13.5,<0.16.0"            # 한자 → 한글 변환 (REQ-AX-002 정규화)
 
 # --- 보안 / 인증 (SPEC-AX-AUTH-001 Sprint 0) ---
 # PyJWT: JWT 파싱 + 서명 검증 (RS256/EdDSA/ES256 허용 목록 강제)
