@@ -1,5 +1,5 @@
-// jwks_cache_test.go — SPEC-AX-AUTH-001 REQ-AUTH-002 JWKS Cache RED phase 테스트
-// Sprint 2 GREEN에서 JWKSCache.GetKey 실제 구현 후 PASS로 전환 예정.
+// jwks_cache_test.go — SPEC-AX-AUTH-001 REQ-AUTH-002 JWKS Cache GREEN phase 테스트
+// Sprint 2 GREEN: 실제 행동 검증 assertion으로 정규화 (Lesson #4 적용)
 //
 // 커버리지 목표: AC-AUTH-002-O1, AC-AUTH-002-Stale, JWKS cache performance
 package auth
@@ -42,31 +42,33 @@ type jwksResponse struct {
 }
 
 // mockJWKSResponse — 복수 kid를 포함하는 JWKS JSON 바이트를 반환한다.
-// 실제 RSA/EC 파라미터는 RED phase에서는 dummy 값 사용 (GREEN에서 실 키로 교체)
+// RSA 키: 실제 파싱 가능한 base64url 인코딩 값 사용 (n="\x01", e="\x01\x00\x01")
 func mockJWKSResponse(kids ...string) []byte {
 	keys := make([]jwksKey, 0, len(kids))
 	for i, kid := range kids {
 		var k jwksKey
 		if i%2 == 0 {
-			// RSA 키 (dummy 파라미터)
+			// RSA 키 — base64url 디코딩 가능한 최소 유효값
+			// n="\x01" (1바이트), e="\x01\x00\x01" (65537)
 			k = jwksKey{
 				Kid: kid,
 				Kty: "RSA",
 				Alg: "RS256",
 				Use: "sig",
-				N:   "sIqyUfv-abc123",
-				E:   "AQAB",
+				N:   "AQ",   // base64url("\x01")
+				E:   "AQAB", // base64url("\x01\x00\x01") = 65537
 			}
 		} else {
-			// EC 키 (dummy 파라미터)
+			// EC 키 — P-256 곡선, base64url 디코딩 가능한 32바이트 값
+			// x, y는 32바이트 제로 패딩 (실제 유효하지 않은 점이지만 파싱은 가능)
 			k = jwksKey{
 				Kid: kid,
 				Kty: "EC",
 				Alg: "ES256",
 				Use: "sig",
 				Crv: "P-256",
-				X:   "xyz123",
-				Y:   "abc456",
+				X:   "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", // 32바이트 zeros
+				Y:   "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 			}
 		}
 		keys = append(keys, k)
@@ -126,26 +128,21 @@ func TestJWKSCache_GetKey_CacheHit(t *testing.T) {
 	ctx := context.Background()
 
 	// 첫 fetch로 캐시 populate
-	_, _, _, _ = cache.GetKey(ctx, "key-v1")
+	_, _, _, err := cache.GetKey(ctx, "key-v1")
+	require.NoError(t, err, "첫 번째 GetKey는 성공해야 함")
 	initialFetch := fetchCount.Load()
 
 	// 두 번째 호출 — 캐시 히트여야 함
 	start := time.Now()
-	key, alg, kty, err := cache.GetKey(ctx, "key-v1")
+	key, alg, kty, err2 := cache.GetKey(ctx, "key-v1")
 	elapsed := time.Since(start)
 
-	// RED: stub이 "not implemented" 반환 → err != nil
-	// GREEN 후: err == nil, elapsed < 1ms, fetchCount == initialFetch (추가 fetch 없음)
-	if err == nil {
-		assert.NotNil(t, key, "캐시 히트 시 키가 nil이면 안 됨")
-		assert.NotEmpty(t, alg, "alg가 비어있으면 안 됨")
-		assert.NotEmpty(t, kty, "kty가 비어있으면 안 됨")
-		assert.Less(t, elapsed, time.Millisecond, "캐시 히트는 1ms 미만이어야 함")
-		assert.Equal(t, initialFetch, fetchCount.Load(), "캐시 히트 시 추가 fetch 없어야 함")
-	} else {
-		// stub 상태 — "not implemented" 에러 기대
-		assert.Error(t, err, "stub 상태에서는 에러 반환")
-	}
+	require.NoError(t, err2, "캐시 히트 시 에러가 없어야 함")
+	assert.NotNil(t, key, "캐시 히트 시 키가 nil이면 안 됨")
+	assert.NotEmpty(t, alg, "alg가 비어있으면 안 됨")
+	assert.NotEmpty(t, kty, "kty가 비어있으면 안 됨")
+	assert.Less(t, elapsed, time.Millisecond, "캐시 히트는 1ms 미만이어야 함")
+	assert.Equal(t, initialFetch, fetchCount.Load(), "캐시 히트 시 추가 fetch 없어야 함")
 }
 
 // ────────────────────────────────────────────────────────────
@@ -169,16 +166,11 @@ func TestJWKSCache_GetKey_CacheMiss_Fetch(t *testing.T) {
 
 	key, alg, kty, err := cache.GetKey(ctx, "key-v1")
 
-	// RED: stub → err != nil
-	// GREEN 후: fetchCount == 1, key != nil, err == nil
-	if err == nil {
-		assert.Equal(t, int64(1), fetchCount.Load(), "캐시 미스 시 fetch 1회 발생해야 함")
-		assert.NotNil(t, key)
-		assert.NotEmpty(t, alg)
-		assert.NotEmpty(t, kty)
-	} else {
-		assert.Error(t, err, "stub 상태에서는 에러 반환")
-	}
+	require.NoError(t, err, "캐시 미스 후 fetch는 성공해야 함")
+	assert.Equal(t, int64(1), fetchCount.Load(), "캐시 미스 시 fetch 1회 발생해야 함")
+	assert.NotNil(t, key, "fetch 후 키가 반환되어야 함")
+	assert.NotEmpty(t, alg, "alg가 반환되어야 함")
+	assert.NotEmpty(t, kty, "kty가 반환되어야 함")
 }
 
 // ────────────────────────────────────────────────────────────
@@ -203,26 +195,22 @@ func TestJWKSCache_GetKey_TTLExpired_BackgroundRefresh(t *testing.T) {
 	ctx := context.Background()
 
 	// 초기 캐시 populate
-	_, _, _, _ = cache.GetKey(ctx, "key-v1")
+	_, _, _, err := cache.GetKey(ctx, "key-v1")
+	require.NoError(t, err, "초기 populate 성공해야 함")
 	fetchAfterPopulate := fetchCount.Load()
 
 	// TTL 만료 대기
 	time.Sleep(60 * time.Millisecond)
 
 	// TTL 만료 후 호출 — stale 반환 + 백그라운드 refresh
-	key, _, _, err := cache.GetKey(ctx, "key-v1")
+	key, _, _, err2 := cache.GetKey(ctx, "key-v1")
 
 	// 백그라운드 refresh 완료 대기 (비동기)
 	time.Sleep(50 * time.Millisecond)
 
-	// RED: stub → err != nil
-	// GREEN 후: err == nil (stale 반환), fetchCount > fetchAfterPopulate
-	if err == nil {
-		assert.NotNil(t, key, "stale 반환 시 키가 nil이면 안 됨")
-		assert.Greater(t, fetchCount.Load(), fetchAfterPopulate, "백그라운드 refresh 발생해야 함")
-	} else {
-		assert.Error(t, err, "stub 상태에서는 에러 반환")
-	}
+	require.NoError(t, err2, "stale 반환 시 에러가 없어야 함")
+	assert.NotNil(t, key, "stale 반환 시 키가 nil이면 안 됨")
+	assert.Greater(t, fetchCount.Load(), fetchAfterPopulate, "백그라운드 refresh 발생해야 함")
 }
 
 // ────────────────────────────────────────────────────────────
@@ -263,21 +251,17 @@ func TestJWKSCache_GetKey_JWKSUnavailable_StaleReturn(t *testing.T) {
 	ctx := context.Background()
 
 	// 초기 populate (성공)
-	_, _, _, _ = cache.GetKey(ctx, "key-v1")
+	_, _, _, err := cache.GetKey(ctx, "key-v1")
+	require.NoError(t, err, "초기 populate 성공해야 함")
 
 	// TTL 만료 대기
 	time.Sleep(60 * time.Millisecond)
 
 	// refresh 실패 상황에서 stale 반환 기대
-	key, _, _, err := cache.GetKey(ctx, "key-v1")
+	key, _, _, err2 := cache.GetKey(ctx, "key-v1")
 
-	// RED: stub → err != nil
-	// GREEN 후: err == nil, key != nil (stale)
-	if err == nil {
-		assert.NotNil(t, key, "JWKS 다운 시 stale 캐시를 반환해야 함")
-	} else {
-		assert.Error(t, err, "stub 상태에서는 에러 반환")
-	}
+	require.NoError(t, err2, "JWKS 다운 시 stale 캐시를 반환해야 함 (degraded mode)")
+	assert.NotNil(t, key, "stale 캐시 키가 nil이면 안 됨")
 }
 
 // ────────────────────────────────────────────────────────────
@@ -301,10 +285,8 @@ func TestJWKSCache_GetKey_JWKSUnavailable_NoCacheError(t *testing.T) {
 
 	_, _, _, err := cache.GetKey(ctx, "key-v1")
 
-	// RED: stub이 "not implemented" 반환 → err != nil (이 테스트는 의도적으로 PASS)
-	// GREEN 후: errors.Is(err, ErrJWKSUnavailable)
 	require.Error(t, err, "JWKS 미가용 + 캐시 없음은 에러를 유발해야 함")
-	// GREEN 후 활성화: assert.True(t, errors.Is(err, ErrJWKSUnavailable))
+	assert.True(t, errors.Is(err, ErrJWKSUnavailable), "ErrJWKSUnavailable이어야 함")
 }
 
 // ────────────────────────────────────────────────────────────
@@ -315,7 +297,7 @@ func TestJWKSCache_GetKey_JWKSUnavailable_NoCacheError(t *testing.T) {
 //
 // Given: JWKS 응답에 "key-v1"만 포함
 // When: GetKey(ctx, "nonexistent-key") 호출
-// Then: 에러 반환 (kid not found)
+// Then: kid not found 메시지를 포함하는 에러 반환
 func TestJWKSCache_GetKey_KidNotFound(t *testing.T) {
 	t.Parallel()
 
@@ -328,9 +310,8 @@ func TestJWKSCache_GetKey_KidNotFound(t *testing.T) {
 
 	_, _, _, err := cache.GetKey(ctx, "nonexistent-key")
 
-	// RED: stub → "not implemented" 에러
-	// GREEN 후: kid not found 에러 반환
-	assert.Error(t, err, "존재하지 않는 kid는 에러를 유발해야 함")
+	require.Error(t, err, "존재하지 않는 kid는 에러를 유발해야 함")
+	assert.ErrorContains(t, err, "nonexistent-key", "에러 메시지에 kid가 포함되어야 함")
 }
 
 // ────────────────────────────────────────────────────────────
@@ -341,7 +322,7 @@ func TestJWKSCache_GetKey_KidNotFound(t *testing.T) {
 //
 // Given: 빈 캐시, 10 고루틴이 동시에 GetKey("key-v1") 호출
 // When: 동시 요청
-// Then: race detector 에러 없음, JWKS fetch 1~2회 (singleflight 또는 mutex 기반)
+// Then: race detector 에러 없음, 모든 고루틴 성공, JWKS fetch 최소 횟수
 //
 // 실행: go test -race ./... 로 race detector 활성화
 func TestJWKSCache_GetKey_Concurrent(t *testing.T) {
@@ -371,18 +352,12 @@ func TestJWKSCache_GetKey_Concurrent(t *testing.T) {
 	wg.Wait()
 	close(errCh)
 
-	// RED: stub → 모든 고루틴이 에러 반환
-	// GREEN 후: 에러 0, fetchCount <= 2 (mutex 기반 단일 fetch)
-	errs := 0
-	for range errCh {
-		errs++
+	// 모든 고루틴이 성공해야 함
+	for err := range errCh {
+		assert.NoError(t, err, "동시 GetKey는 에러 없이 성공해야 함")
 	}
-
-	if errs == 0 {
-		// 성공 경로 검증
-		assert.LessOrEqual(t, fetchCount.Load(), int64(2), "동시 요청 시 fetch는 최대 2회여야 함")
-	}
-	// stub 상태에서는 모든 고루틴이 에러 — race만 없으면 OK
+	// fetchMu로 직렬화 → 최대 2회 fetch (동시 요청 중 한 번 + 재확인)
+	assert.LessOrEqual(t, fetchCount.Load(), int64(2), "동시 요청 시 fetch는 최대 2회여야 함")
 }
 
 // ────────────────────────────────────────────────────────────
@@ -393,7 +368,7 @@ func TestJWKSCache_GetKey_Concurrent(t *testing.T) {
 //
 // Given: TTL 50ms, staleMaxAge 100ms, 초기 populate
 // When: 150ms 경과 (staleMaxAge 초과) 후 GetKey 호출
-// Then: stale 반환 없이 blocking fetch 시도 (성공하면 반환, 실패하면 ErrJWKSUnavailable)
+// Then: stale 반환 없이 blocking fetch 시도 (성공하면 반환)
 func TestJWKSCache_GetKey_StaleMaxAgeExpired_BlockingFetch(t *testing.T) {
 	t.Parallel()
 
@@ -407,21 +382,17 @@ func TestJWKSCache_GetKey_StaleMaxAgeExpired_BlockingFetch(t *testing.T) {
 	ctx := context.Background()
 
 	// 초기 populate
-	_, _, _, _ = cache.GetKey(ctx, "key-v1")
+	_, _, _, err := cache.GetKey(ctx, "key-v1")
+	require.NoError(t, err, "초기 populate 성공해야 함")
 
 	// staleMaxAge 초과 대기
 	time.Sleep(150 * time.Millisecond)
 
-	key, _, _, err := cache.GetKey(ctx, "key-v1")
+	key, _, _, err2 := cache.GetKey(ctx, "key-v1")
 
-	// RED: stub → err != nil
-	// GREEN 후: blocking fetch 발생 (fetchCount >= 2), err == nil
-	if err == nil {
-		assert.NotNil(t, key)
-		assert.GreaterOrEqual(t, fetchCount.Load(), int64(2), "staleMaxAge 초과 시 재fetch 발생해야 함")
-	} else {
-		assert.Error(t, err)
-	}
+	require.NoError(t, err2, "staleMaxAge 초과 후 blocking fetch는 성공해야 함")
+	assert.NotNil(t, key, "blocking fetch 후 키가 반환되어야 함")
+	assert.GreaterOrEqual(t, fetchCount.Load(), int64(2), "staleMaxAge 초과 시 재fetch 발생해야 함")
 }
 
 // ────────────────────────────────────────────────────────────
@@ -464,9 +435,8 @@ func TestJWKSCache_GetKey_EmptyKid(t *testing.T) {
 
 	_, _, _, err := cache.GetKey(ctx, "")
 
-	// RED: stub → "not implemented" 에러
-	// GREEN 후: kid not found 또는 validation 에러
-	assert.Error(t, err, "빈 kid는 에러를 유발해야 함")
+	require.Error(t, err, "빈 kid는 에러를 유발해야 함")
+	assert.ErrorContains(t, err, "kid가 비어 있습니다", "빈 kid 관련 에러 메시지여야 함")
 }
 
 // ────────────────────────────────────────────────────────────

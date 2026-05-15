@@ -1,5 +1,5 @@
-// oidc_test.go — SPEC-AX-AUTH-001 REQ-AUTH-002 OIDC Discovery RED phase 테스트
-// Sprint 2 GREEN에서 OIDCClient 실제 구현 후 PASS로 전환 예정.
+// oidc_test.go — SPEC-AX-AUTH-001 REQ-AUTH-002 OIDC Discovery GREEN phase 테스트
+// Sprint 2 GREEN: 실제 행동 검증 assertion으로 정규화 (Lesson #4 적용)
 //
 // 커버리지 목표: AC-AUTH-002-1/2/3
 package auth
@@ -7,7 +7,6 @@ package auth
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -118,7 +117,7 @@ func TestOIDCClient_Discover_Success(t *testing.T) {
 //
 // Given: 서버가 404 반환
 // When: NewOIDCClient 호출
-// Then: 에러 반환 (panic 또는 error, fail-fast)
+// Then: non-200 응답 관련 에러 반환
 func TestOIDCClient_Discover_Non200(t *testing.T) {
 	t.Parallel()
 
@@ -129,23 +128,21 @@ func TestOIDCClient_Discover_Non200(t *testing.T) {
 
 	ctx := context.Background()
 
-	// non-200 → NewOIDCClient는 에러를 반환하거나 panic 발생
-	// stub에서는 "not implemented" 에러 반환 — RED phase에서 이 테스트는 실패
 	_, err := NewOIDCClient(ctx, srv.URL)
-	// RED: stub이 "not implemented"를 반환하므로 에러가 발생하지만
-	// 이 테스트는 "not found" 서버를 쓸 때도 non-nil 에러를 기대함
-	assert.Error(t, err, "non-200 응답은 에러를 유발해야 함")
+
+	require.Error(t, err, "non-200 응답은 에러를 유발해야 함")
+	assert.ErrorContains(t, err, "404", "에러 메시지에 HTTP 상태 코드가 포함되어야 함")
 }
 
 // ────────────────────────────────────────────────────────────
 // TestOIDCClient_Discover_Timeout — AC-AUTH-002-2 (timeout)
 // ────────────────────────────────────────────────────────────
 
-// TestOIDCClient_Discover_Timeout — 서버 응답 없음 시 10초 타임아웃 에러
+// TestOIDCClient_Discover_Timeout — 서버 응답 없음 시 타임아웃 에러
 //
-// Given: 서버가 응답하지 않는 URL (closed 서버)
+// Given: 서버가 응답하지 않는 URL (hang)
 // When: 짧은 타임아웃 HTTP 클라이언트로 NewOIDCClient 호출
-// Then: context deadline exceeded 에러 반환
+// Then: context deadline exceeded 또는 타임아웃 에러 반환
 func TestOIDCClient_Discover_Timeout(t *testing.T) {
 	t.Parallel()
 
@@ -157,13 +154,14 @@ func TestOIDCClient_Discover_Timeout(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	ctx := context.Background()
-	// 50ms 타임아웃 클라이언트로 10초 대기 대신 빠르게 테스트
+	// 50ms 타임아웃 클라이언트로 빠르게 테스트
 	shortClient := &http.Client{Timeout: 50 * time.Millisecond}
 
 	_, err := NewOIDCClient(ctx, srv.URL, WithHTTPClient(shortClient))
 
-	// RED: stub이 "not implemented" 반환 — GREEN 후 deadline exceeded 에러 기대
-	assert.Error(t, err, "타임아웃은 에러를 유발해야 함")
+	require.Error(t, err, "타임아웃은 에러를 유발해야 함")
+	// context deadline exceeded 또는 Client.Timeout exceeded 에러
+	assert.ErrorContains(t, err, "실패", "타임아웃은 요청 실패 에러를 유발해야 함")
 }
 
 // ────────────────────────────────────────────────────────────
@@ -184,8 +182,7 @@ func TestOIDCClient_Discover_IssuerMismatch(t *testing.T) {
 	_, err := NewOIDCClient(ctx, issuerURL)
 
 	require.Error(t, err, "issuer 불일치는 에러를 유발해야 함")
-	// GREEN 후: "discovery issuer mismatch" 메시지 포함 확인
-	// RED: stub이 "not implemented" 반환 — 에러 발생 자체는 확인됨
+	assert.ErrorContains(t, err, "discovery issuer mismatch", "에러 메시지에 mismatch가 포함되어야 함")
 }
 
 // ────────────────────────────────────────────────────────────
@@ -206,14 +203,8 @@ func TestOIDCClient_Discover_CustomHTTPClient(t *testing.T) {
 
 	client, err := NewOIDCClient(ctx, issuerURL, WithHTTPClient(customClient))
 
-	// RED: stub이 "not implemented" → err != nil
-	// GREEN 후: err == nil, client != nil
-	if err != nil {
-		// stub 상태에서는 에러가 예상됨 — 단, "not implemented" 에러
-		assert.True(t, errors.Is(err, err), "에러가 발생하더라도 panic이 아닌 error 반환")
-	} else {
-		assert.NotNil(t, client, "성공 시 client가 nil이면 안 됨")
-	}
+	require.NoError(t, err, "커스텀 HTTP 클라이언트로 Discovery 성공해야 함")
+	assert.NotNil(t, client, "성공 시 client가 nil이면 안 됨")
 }
 
 // ────────────────────────────────────────────────────────────
@@ -223,8 +214,8 @@ func TestOIDCClient_Discover_CustomHTTPClient(t *testing.T) {
 // TestDiscover_DirectCall — Discover 함수가 올바른 URL로 요청하는지 검증
 //
 // Given: valid httptest OIDC 서버
-// When: Discover(ctx, issuerURL+"/.well-known/openid-configuration", client) 호출
-// Then: *Metadata 반환, 필드 정확
+// When: Discover(ctx, issuerURL, client) 호출
+// Then: *Metadata 반환, issuer 필드 정확
 func TestDiscover_DirectCall(t *testing.T) {
 	t.Parallel()
 
@@ -235,12 +226,8 @@ func TestDiscover_DirectCall(t *testing.T) {
 
 	meta, err := Discover(ctx, issuerURL, client)
 
-	// RED: stub이 "not implemented" → err != nil, meta == nil
-	// GREEN 후: err == nil, meta.Issuer == issuerURL
-	if err != nil {
-		assert.Nil(t, meta, "에러 시 meta는 nil이어야 함")
-	} else {
-		require.NotNil(t, meta, "성공 시 meta가 nil이면 안 됨")
-		assert.Equal(t, issuerURL, meta.Issuer, "issuer 일치해야 함")
-	}
+	require.NoError(t, err, "Discover 성공해야 함")
+	require.NotNil(t, meta, "성공 시 meta가 nil이면 안 됨")
+	assert.Equal(t, issuerURL, meta.Issuer, "issuer 일치해야 함")
+	assert.NotEmpty(t, meta.JWKSUri, "jwks_uri가 비어있으면 안 됨")
 }
