@@ -70,7 +70,7 @@ func TestBuildEnvelope_WithUserID_PopulatesHeader(t *testing.T) {
 }
 
 // TestBuildEnvelope_EmptyUserID_DefaultsToCliAnonymous
-// userID='' 입력 시 headers.user_id='cli-anonymous' 폴백 검증.
+// userID=” 입력 시 headers.user_id='cli-anonymous' 폴백 검증.
 //
 // RED: BuildEnvelope 시그니처에 userID 파라미터가 없음 → 컴파일 에러.
 // GREEN: 빈 userID → 'cli-anonymous' 기본값 처리 후 PASS.
