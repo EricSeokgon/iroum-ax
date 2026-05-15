@@ -5,6 +5,61 @@
 
 ---
 
+## Sprint 4 — REQ-AUTH-003-E3 Python Middleware + REQ-AUTH-UBI-001 Cross-SPEC Envelope
+
+### RED phase (2026-05-15)
+
+**파일 생성:**
+- `tests/unit/test_req_auth_003_python_middleware.py` — 16개 테스트 (FAIL 14, PASS 2)
+- `apps/control-plane/internal/scheduler/celery_envelope_user_test.go` — 5개 테스트 (컴파일 에러 → RED)
+- `apps/control-plane/internal/scheduler/testdata/celery_envelope_v2_anon.json` — 신규 골든 파일
+- `apps/control-plane/internal/scheduler/testdata/celery_envelope_v2_authuser.json` — 신규 골든 파일
+- `.moai/sprints/SPEC-AX-AUTH-001/sprint-REQ-AUTH-003-cross-spec.md` — Sprint Contract
+
+**의존성 추가:** 없음 (fastapi sys.modules mock 패턴 사용)
+
+**AC 완료 수:** 0 / 17 (RED phase — 미구현 상태가 정상)
+
+**테스트 상태 (Sprint 4 신규 — Python):**
+- FAIL: 14개 (진성 RED)
+  - TokenValidatorVerify 6개: stub `NotImplementedError` 반환 → 잘못된 예외 타입
+  - TestVerifyTokenDepends 8개: stub `HTTPException(501)` 반환 → status_code 불일치
+- PASS: 2개 (stub에 이미 구현된 경로)
+  - `test_verify_token_missing_header_returns_401` — credentials=None 시 401 반환 (이미 구현)
+  - `test_verify_token_auth_disabled_returns_anonymous` — AUTH_ENABLED=false 폴백 (이미 구현)
+- Total: 16개 테스트
+
+**테스트 상태 (Sprint 4 신규 — Go):**
+- FAIL (컴파일): 5개 (진성 RED — BuildEnvelope 5번째 파라미터 없음)
+  - TestBuildEnvelope_WithUserID_PopulatesHeader
+  - TestBuildEnvelope_EmptyUserID_DefaultsToCliAnonymous
+  - TestBuildEnvelope_GoldenFileMatch_AuthUser
+  - TestBuildEnvelope_GoldenFileMatch_Anonymous
+  - TestBuildEnvelope_BackwardCompat_OriginalGoldenStillValid
+
+**RED 실패 이유 (진성, Lesson #4 준수):**
+- Python TokenValidatorVerify: stub `raise NotImplementedError("구현 예정: Sprint 1 GREEN")` → 기대 예외와 다른 타입
+- Python verify_token AUTH_ENABLED=true: stub `raise HTTPException(status_code=501)` → status_code 불일치
+- Go: BuildEnvelope 시그니처 파라미터 수 불일치(4 → 5) → 컴파일 에러
+
+**Sprint 3 회귀:**
+- Python: 177 / 177 PASS (신규 16개 제외)
+- Go: auth/audit/server/workflow/store 패키지 OK (scheduler 패키지 빌드 실패는 RED 테스트 파일 때문)
+
+**에러 델타:** +14 Python FAIL + 5 Go 컴파일 에러 (모두 진성 RED)
+
+**Cross-SPEC 아티팩트:**
+- `testdata/celery_envelope_v2.json` 무손상 유지 (Sprint 6 CTRL 15개 회귀 가드)
+- `testdata/celery_envelope_v2_anon.json` 신규 (user_id='cli-anonymous')
+- `testdata/celery_envelope_v2_authuser.json` 신규 (user_id='kepco-analyst-001')
+
+**다음 단계:** Sprint 4 GREEN
+- `dispatcher.go` BuildEnvelope: 5번째 파라미터 userID 추가 + headers["user_id"] 설정
+- `validator.py`: PyJWT decode + RS256 서명 검증 + alg allow-list + SF-1/SF-2 구현
+- `dependencies.py`: TokenValidator 연동 + 예외→HTTPException 변환 + WWW-Authenticate 헤더
+
+---
+
 ## Sprint 3 — REQ-AUTH-003 gRPC + REST Middleware (Go)
 
 ### RED phase (2026-05-15)
