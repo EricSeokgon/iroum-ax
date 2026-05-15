@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/ircp/iroum-ax/apps/control-plane/internal/metrics"
 )
 
 // ErrDispatchFailed Redis RPUSH 실패 시 반환되는 에러 (R-CTRL-003 PENDING 고아 mitigation)
@@ -92,9 +94,13 @@ func (d *CeleryDispatcher) Dispatch(ctx context.Context, workflowID, documentID 
 
 	// Redis RPUSH
 	if _, rpushErr := d.redis.RPush(ctx, d.queue, envelopeBytes); rpushErr != nil {
+		// @MX:NOTE: [AUTO] dispatch 실패 시 metrics 계측 — ErrDispatchFailed 래핑 전에 기록
+		metrics.IncCeleryDispatch("failure")
 		return fmt.Errorf("%w: %w", ErrDispatchFailed, rpushErr)
 	}
 
+	// @MX:NOTE: [AUTO] dispatch 성공 시 metrics 계측
+	metrics.IncCeleryDispatch("success")
 	return nil
 }
 

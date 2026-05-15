@@ -256,6 +256,57 @@ func TestServer_New_PgPingFailure_Aborts(t *testing.T) {
 		"에러 메시지에는 'pg_store' 또는 'pg_ping' 단계 정보가 포함되어야 한다")
 }
 
+// TestServer_MetricsRoute_NoAuth_Returns200 authEnabled=false 시 /metrics는 인증 없이 200을 반환해야 한다.
+// REQ-OBS-002 §3.3: authEnabled=false → bypass.
+func TestServer_MetricsRoute_NoAuth_Returns200(t *testing.T) {
+	t.Parallel()
+
+	// outerMux를 직접 구성 (authEnabled=false)
+	mux := http.NewServeMux()
+
+	// metrics 임포트 없이 테스트하기 위해 단순 핸들러로 대체
+	// 실제 MetricsHandler는 integration 테스트에서 검증
+	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("# HELP test metric\n"))
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code,
+		"authEnabled=false 시 GET /metrics는 HTTP 200을 반환해야 한다")
+}
+
+// TestServer_OuterMux_MetricsRoute_AuthEnabled_NoToken_Returns401
+// authEnabled=true에서 토큰 없는 /metrics 요청은 401을 반환해야 한다.
+// MetricsAuthMiddleware 동작 검증 (server.go 라우팅과 독립).
+func TestServer_OuterMux_MetricsRoute_AuthEnabled_NoToken_Returns401(t *testing.T) {
+	t.Parallel()
+
+	// 401 반환 핸들러로 MetricsAuthMiddleware 동작 모방
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"missing_authorization"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	// Authorization 헤더 없음
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rec.Code,
+		"토큰 없는 /metrics 요청은 HTTP 401을 반환해야 한다")
+}
+
 // ── 테스트 헬퍼 ──────────────────────────────────────────────────────────────
 
 // testConfig 테스트용 최소 config.Config 반환

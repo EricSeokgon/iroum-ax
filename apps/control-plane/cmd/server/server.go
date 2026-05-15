@@ -22,6 +22,8 @@ import (
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/audit"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/auth"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/config"
+	"github.com/ircp/iroum-ax/apps/control-plane/internal/metrics"
+	"github.com/ircp/iroum-ax/apps/control-plane/internal/observability"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/proto"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/scheduler"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/server"
@@ -52,6 +54,9 @@ type Server struct {
 	grpcServer     *grpc.Server
 	httpServer     *http.Server
 	logger         *zap.Logger
+	// tracerShutdown — OTel TracerProvider graceful shutdown 클로저 (Sprint 2)
+	// @MX:NOTE: [AUTO] InitTracer가 반환한 shutdown 클로저 — server.shutdown() defer 체인에 등록
+	tracerShutdown func(context.Context) error
 	restAddr       string
 	grpcAddr       string
 	mu             sync.RWMutex
@@ -68,9 +73,19 @@ type Server struct {
 func New(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Server, error) {
 	s := &Server{cfg: cfg, logger: logger}
 
+	// 단계 (b-1): OTel TracerProvider 초기화 (망분리 정합: noop default)
+	// OTEL_EXPORTER_OTLP_ENDPOINT 미설정 시 NeverSample → 외부 전송 0 (REQ-OBS-UBI-001-a)
+	// @MX:NOTE: [AUTO] InitTracer는 otel.SetTracerProvider(전역 등록) + shutdown 클로저 반환
+	_, tracerShutdown, err := observability.InitTracer(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("init step otel_tracer failed: %w", err)
+	}
+	s.tracerShutdown = tracerShutdown
+
 	// 단계 (c): PgWorkflowStore 초기화 + Ping 검증
 	pgStore, err := store.NewPgWorkflowStore(ctx, cfg.PostgresDSN, logger)
 	if err != nil {
+		_ = tracerShutdown(ctx) //nolint:errcheck
 		return nil, fmt.Errorf("init step pg_store failed: %w", err)
 	}
 	s.pgStore = pgStore
@@ -78,8 +93,19 @@ func New(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Server, 
 	// 단계 (c) — pg_ping: 명시적 readiness 재확인
 	if err := pgStore.Ping(ctx); err != nil {
 		pgStore.Close()
+		_ = tracerShutdown(ctx) //nolint:errcheck
 		return nil, fmt.Errorf("init step pg_ping failed: %w", err)
 	}
+
+	// 단계 (c-1): pg pool GaugeFunc 등록 (pgStore 초기화 이후 — REQ-OBS-001)
+	// @MX:NOTE: [AUTO] pg pool 연결 수 GaugeFunc — pgStore 의존으로 순서 고정
+	metrics.RegisterPgPoolGauge(metrics.Registry(), func() float64 {
+		stat := pgStore.PoolStats()
+		if stat == nil {
+			return 0
+		}
+		return float64(stat.AcquiredConns())
+	})
 
 	// 단계 (d): Redis 클라이언트 초기화 + Ping 검증
 	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
@@ -124,8 +150,12 @@ func New(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Server, 
 		s.jwksCache = jc
 
 		// 단계 (f): TokenValidator + RefreshStore
+		// @MX:NOTE: [AUTO] WithRejectionObserver(metrics.GlobalMetrics()) — auth→metrics 순환 import 해소를 위한 DI 진입점
+		// @MX:ANCHOR: [AUTO] TokenValidator 의존성 주입 지점 (server.go) — auth.RejectionObserver DI 계약
+		// @MX:REASON: auth 패키지가 metrics import 금지 → server.go(package main)에서만 둘을 연결 가능
 		tv, err := auth.New(ctx, cfg.OIDCIssuerURL, cfg.OIDCAudience,
 			auth.WithJWKSProvider(jc),
+			auth.WithRejectionObserver(metrics.GlobalMetrics()),
 		)
 		if err != nil {
 			_ = redisClient.Close() //nolint:errcheck
@@ -185,6 +215,16 @@ func (s *Server) Run(ctx context.Context) error {
 	outerMux := http.NewServeMux()
 	outerMux.HandleFunc("GET /health", livenessHandler)
 	outerMux.HandleFunc("GET /ready", readinessHandler(s))
+
+	// /metrics: MetricsAuthMiddleware(독립 authn+authz) → MetricsHandler
+	// BuildRESTChain 외부에서 독립적으로 마운트 — auth chain bypass (REQ-OBS-002)
+	// @MX:NOTE: [AUTO] /metrics는 BuildRESTChain 외부 독립 마운트 — MetricsAuthMiddleware 전용 authn+authz 적용
+	outerMux.Handle("GET /metrics",
+		metrics.MetricsAuthMiddleware(s.tokenValidator, s.cfg.AuthEnabled)(
+			metrics.MetricsHandler(),
+		),
+	)
+
 	// 나머지 경로: auth chain으로 wrapping
 	// recorder=nil: audit.Recorder가 auth.auditRecorder 인터페이스를 아직 구현하지 않음 (S2 TODO)
 	outerMux.Handle("/", auth.BuildRESTChain(
@@ -330,6 +370,14 @@ func (s *Server) shutdown(ctx context.Context, reason string) {
 		// (iv) PgStore close
 		if s.pgStore != nil {
 			s.pgStore.Close()
+		}
+
+		// (v) OTel TracerProvider graceful shutdown
+		// @MX:NOTE: [AUTO] tracerShutdown은 sdkTP.Shutdown — span buffer flush 후 종료
+		if s.tracerShutdown != nil {
+			if err := s.tracerShutdown(shutdownCtx); err != nil {
+				s.logger.Warn("OTel TracerProvider shutdown 오류", zap.Error(err))
+			}
 		}
 
 		// SERVER_SHUTDOWN_COMPLETED audit

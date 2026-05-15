@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	cperrors "github.com/ircp/iroum-ax/apps/control-plane/internal/errors"
+	"github.com/ircp/iroum-ax/apps/control-plane/internal/metrics"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/types"
 	"go.uber.org/zap"
 )
@@ -114,6 +115,8 @@ func (sm *StateMachine) Start(ctx context.Context, workflowID string) error {
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("state machine start: commit: %w", err)
 	}
+	// @MX:NOTE: [AUTO] PENDING→RUNNING 전이 성공 후 metrics hook — commit 이후에만 계측 (commit 실패 시 카운트 안 함)
+	metrics.IncWorkflowTransition(string(types.WorkflowStatePending), string(types.WorkflowStateRunning))
 	return nil
 }
 
@@ -154,6 +157,8 @@ func (sm *StateMachine) Complete(ctx context.Context, workflowID string, resultJ
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("state machine complete: commit: %w", err)
 	}
+	// @MX:NOTE: [AUTO] RUNNING→COMPLETED 전이 성공 후 metrics hook — commit 이후에만 계측
+	metrics.IncWorkflowTransition(string(types.WorkflowStateRunning), string(types.WorkflowStateCompleted))
 	return nil
 }
 
@@ -200,6 +205,8 @@ func (sm *StateMachine) Fail(ctx context.Context, workflowID string, reason stri
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("state machine fail: commit: %w", err)
 	}
+	// @MX:NOTE: [AUTO] →FAILED 전이 성공 후 metrics hook — from 상태를 동적으로 반영
+	metrics.IncWorkflowTransition(string(wf.State), string(types.WorkflowStateFailed))
 	return nil
 }
 
