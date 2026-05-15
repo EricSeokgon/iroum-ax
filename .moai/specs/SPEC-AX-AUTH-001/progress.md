@@ -5,6 +5,58 @@
 
 ---
 
+## Sprint 5 — REQ-AUTH-004 RBAC 3-role Matrix
+
+### RED phase (2026-05-15)
+
+**파일 생성/수정:**
+- `apps/control-plane/internal/auth/rbac_test.go` — 18개 테스트 (진성 RED 14개, PASS 4개)
+- `apps/control-plane/internal/auth/rbac.go` — stub 함수 추가: ParseRolesFromScope, EffectivePermissions, LogForbidden
+- `apps/control-plane/internal/audit/audit.go` — ActionAuthForbidden 상수 추가
+- `.moai/sprints/SPEC-AX-AUTH-001/sprint-REQ-AUTH-004.md` — Sprint Contract (Priority: Security)
+
+**의존성 추가:** 없음 (기존 audit/store 패키지 사용)
+
+**AC 완료 수:** 0 / 6 (RED phase — 미구현 상태가 정상)
+
+**테스트 상태 (Sprint 5 신규):**
+- FAIL: 14개 (진성 RED)
+  - ParseRolesFromScope 3개: stub nil 반환 → non-empty 기대
+  - EffectivePermissions 4개: stub nil 반환 → non-nil 맵 + 특정 권한 기대
+  - Authorize 4개: stub "구현 예정" 에러 → NoError/ErrInsufficientPermission 기대
+  - LogForbidden 4개: stub "구현 예정" 에러 → 정상 audit 기록 기대
+- PASS: 4개 (stub과 호환되는 에러 경로)
+  - TestParseRolesFromScope_EmptyString (nil == empty)
+  - TestParseRolesFromScope_InvalidRoleIgnored (nil == empty)
+  - TestAuthorize_NoUserInContext_ReturnsError (stub 에러 → assert.Error PASS)
+- Total: 18개 테스트
+
+**RED 실패 이유 (진성, Lesson #4 준수):**
+- ParseRolesFromScope: stub nil 반환 → require.Len(t, roles, 1) FAIL
+- EffectivePermissions: stub nil 반환 → require.NotNil FAIL
+- Authorize admin: stub "구현 예정" → assert.NoError FAIL
+- LogForbidden: stub "구현 예정" → require.NoError FAIL
+
+**Sprint 1-4 회귀:**
+- Go: scheduler/server/store/workflow/audit 패키지 OK (auth만 FAIL)
+- Python: Sprint 4 상태 유지 (192+)
+
+**에러 델타:** +14 신규 FAIL (모두 진성 RED)
+
+**신규 심볼:**
+- `auth.ParseRolesFromScope(scope string) []Role`
+- `auth.EffectivePermissions(roles []Role) map[Permission]bool`
+- `auth.LogForbidden(ctx, tx, method, path, userID, roles) error`
+- `audit.ActionAuthForbidden = "AUTH_FORBIDDEN"`
+
+**다음 단계:** Sprint 5 GREEN
+- ParseRolesFromScope: regex `^iroum-ax:(admin|analyst|viewer)$` 파싱 구현
+- EffectivePermissions: permissionMatrix union 로직 구현 (read:/write:/delete:/audit: 표준화)
+- Authorize: UserFromContext + ParseRolesFromScope + EffectivePermissions 연동
+- LogForbidden: audit.AuditTx.InsertAuditLog + AUTH_FORBIDDEN 이벤트 생성
+
+---
+
 ## Sprint 4 — REQ-AUTH-003-E3 Python Middleware + REQ-AUTH-UBI-001 Cross-SPEC Envelope
 
 ### RED phase (2026-05-15)

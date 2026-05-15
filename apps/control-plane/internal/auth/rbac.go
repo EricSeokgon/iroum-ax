@@ -5,6 +5,8 @@ package auth
 import (
 	"context"
 	"errors"
+
+	"github.com/ircp/iroum-ax/apps/control-plane/internal/audit"
 )
 
 // Role — 시스템 내 역할 타입
@@ -65,5 +67,33 @@ func Authorize(_ context.Context, requiredPerm string) error {
 	// Sprint 5에서 permissionMatrix를 사용하는 실제 로직으로 교체
 	_ = permissionMatrix
 	_ = requiredPerm
+	return errors.New("구현 예정: Sprint 5 GREEN")
+}
+
+// ParseRolesFromScope — scope 문자열에서 iroum-ax:* 패턴의 역할을 추출한다.
+// 공백으로 구분된 scope 토큰 중 "iroum-ax:(admin|analyst|viewer)" 형식만 인식한다.
+// 미인식 토큰은 silently drop된다 (AC-AUTH-004-5).
+//
+// @MX:TODO Sprint 5 GREEN — regex `^iroum-ax:(admin|analyst|viewer)$` 파싱 구현
+func ParseRolesFromScope(_ string) []Role {
+	// Sprint 5에서 실제 파싱 로직으로 교체
+	return nil
+}
+
+// EffectivePermissions — 역할 목록의 permission union 집합을 반환한다.
+// 여러 역할이 주어지면 각 역할의 권한을 합집합으로 계산한다 (AC-AUTH-004-4).
+//
+// @MX:TODO Sprint 5 GREEN — permissionMatrix를 사용한 union 로직 구현
+func EffectivePermissions(_ []Role) map[Permission]bool {
+	// Sprint 5에서 실제 union 로직으로 교체
+	return nil
+}
+
+// LogForbidden — RBAC 접근 거부 이벤트를 audit_logs에 기록한다.
+// action=AUTH_FORBIDDEN, method, path, user_id, granted_roles를 details JSON에 포함한다.
+//
+// @MX:TODO Sprint 5 GREEN — audit.ActionAuthForbidden 이벤트 삽입 구현
+func LogForbidden(_ context.Context, _ audit.AuditTx, _ string, _ string, _ string, _ []Role) error {
+	// Sprint 5에서 실제 audit 기록 로직으로 교체
 	return errors.New("구현 예정: Sprint 5 GREEN")
 }

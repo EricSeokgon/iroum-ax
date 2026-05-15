@@ -29,6 +29,9 @@ const (
 	ActionCallbackRejectedTerminal Action = "CALLBACK_REJECTED_TERMINAL"
 	// ActionWorkflowCreateCancelled 워크플로우 생성 요청 취소
 	ActionWorkflowCreateCancelled Action = "WORKFLOW_CREATE_CANCELLED"
+	// ActionAuthForbidden RBAC 권한 부족으로 접근 거부
+	// REQ-AUTH-004-U1: HTTP 403 / gRPC PERMISSION_DENIED 시 기록
+	ActionAuthForbidden Action = "AUTH_FORBIDDEN"
 )
 
 // Event 감사 로그 이벤트 엔티티
