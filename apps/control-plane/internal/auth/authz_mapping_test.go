@@ -232,6 +232,19 @@ func TestLookupGRPCPermission_UnknownMethod_DefaultDeny(t *testing.T) {
 	}
 }
 
+// TestLookupRESTPermission_Metrics — SPEC-AX-OBS-001 L301/L336
+// /metrics 경로가 read:metrics 권한으로 매핑되어야 한다 (안전망 매핑).
+// 실제 인증은 MetricsAuthMiddleware가 담당하며, 이 행은 default-deny 안전망 전용이다.
+func TestLookupRESTPermission_Metrics(t *testing.T) {
+	t.Parallel()
+
+	perm, bypass, found := LookupRESTPermission("GET", "/metrics")
+
+	assert.True(t, found, "/metrics는 restPermissionTable에 매핑되어야 한다 (found=true)")
+	assert.False(t, bypass, "/metrics는 bypass=false여야 한다 (인증 필요)")
+	assert.Equal(t, "read:metrics", perm, "GET /metrics → read:metrics (SPEC-AX-OBS-001 L301)")
+}
+
 // BenchmarkLookupRESTPermission — 매핑 lookup 성능 측정 (target p99 < 100µs)
 func BenchmarkLookupRESTPermission(b *testing.B) {
 	b.ReportAllocs()

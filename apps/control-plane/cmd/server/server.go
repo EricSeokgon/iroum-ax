@@ -202,10 +202,16 @@ func (s *Server) Run(ctx context.Context) error {
 	// 단계 (j): Auth chain 조합
 	// s.recorder(*audit.Recorder)는 auth.auditRecorder 인터페이스(LogForbiddenEvent)를 구현하지 않음.
 	// 현재는 nil 전달 (recorder=nil → 감사 기록 skip); S2에서 audit.Recorder에 LogForbiddenEvent 추가 예정.
-	grpcServerOption := auth.BuildGRPCInterceptorChain(s.tokenValidator, nil, s.cfg.AuthEnabled)
+	grpcAuthOption := auth.BuildGRPCInterceptorChain(s.tokenValidator, nil, s.cfg.AuthEnabled)
+
+	// gRPC metrics interceptor — 체인 최외곽(first)에 배치 (REQ-OBS-001, AC-OBS-001-3)
+	// @MX:NOTE: [AUTO] UnaryMetricsInterceptor는 grpc.ChainUnaryInterceptor 최외곽 배치 — 인증 실패 포함 모든 요청 계측
+	grpcMetricsInterceptor := grpc.ChainUnaryInterceptor(
+		metrics.UnaryMetricsInterceptor(metrics.GlobalMetrics()),
+	)
 
 	// gRPC 서버 생성 및 서비스 등록
-	s.grpcServer = grpc.NewServer(grpcServerOption)
+	s.grpcServer = grpc.NewServer(grpcMetricsInterceptor, grpcAuthOption)
 	// WorkflowService 등록 (REQ-SERVER-UBI-001-b 단계 j)
 	proto.RegisterWorkflowServiceServer(s.grpcServer, s.workflowSvc)
 	// 헬스체크 서버 등록 (REQ-SERVER-004-E3)
@@ -234,10 +240,14 @@ func (s *Server) Run(ctx context.Context) error {
 		s.cfg.AuthEnabled,
 	))
 
+	// HTTP instrumentation: outerMux 전체를 최외곽에서 감싸 모든 요청(probe 포함) 계측 (REQ-OBS-001, AC-OBS-001-2)
+	// @MX:NOTE: [AUTO] HTTPInstrumentationMiddleware는 outerMux 최외곽 래핑 — /health, /ready, /metrics 포함 전체 경로 계측
+	instrumentedHandler := metrics.HTTPInstrumentationMiddleware(metrics.GlobalMetrics())(outerMux)
+
 	// HTTP 서버 생성 (G112 Slowloris 방어: ReadHeaderTimeout 명시)
 	s.httpServer = &http.Server{
 		Addr:              s.cfg.RESTAddr,
-		Handler:           outerMux,
+		Handler:           instrumentedHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

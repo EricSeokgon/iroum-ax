@@ -50,6 +50,10 @@ var restPermissionTable = []restEntry{
 
 	// POST /api/v1/documents/upload → write:workflow (업로드는 워크플로우 생성 selfsame)
 	{method: "POST", pathPrefix: "/api/v1/documents/upload", perm: "write:workflow"},
+
+	// GET /metrics → read:metrics (SPEC-AX-OBS-001 L301/L336 안전망 매핑)
+	// 실제 인증은 MetricsAuthMiddleware가 독립 담당 — 이 행은 default-deny 안전망 전용
+	{method: "GET", pathPrefix: "/metrics", perm: "read:metrics"},
 }
 
 // grpcPermissionTable — gRPC FullMethod → Permission 매핑 (REQ-AUTH2-001-E2)

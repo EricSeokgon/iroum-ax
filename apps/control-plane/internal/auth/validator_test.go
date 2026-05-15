@@ -760,3 +760,61 @@ func TestHelpers_MockJWKS_Structure(t *testing.T) {
 	assert.Equal(t, "RSA", jwkMap["kty"])
 	assert.Equal(t, testKIDRSA, jwkMap["kid"])
 }
+
+// ────────────────────────────────────────────────────────────
+// SPEC-AX-OBS-001 §2.2 reason 레이블 정규화 검증
+// ────────────────────────────────────────────────────────────
+
+// captureObserver — IncAuthRejection 호출을 캡처하는 mock RejectionObserver
+// auth 패키지 내부에서 metrics 패키지 import 없이 reason 레이블 검증
+type captureObserver struct {
+	reasons []string
+}
+
+func (c *captureObserver) IncAuthRejection(reason string) {
+	c.reasons = append(c.reasons, reason)
+}
+
+// TestVerify_AlgMismatch_RecordsAlgMismatchReason — SPEC-AX-OBS-001 §2.2
+// kty/alg cross-check 실패 시 reason 레이블이 "alg_mismatch"여야 한다.
+// ES256 토큰 + RSA kty 키 → checkAlgKTYConsistency 실패 → alg_mismatch
+func TestVerify_AlgMismatch_RecordsAlgMismatchReason(t *testing.T) {
+	t.Parallel()
+
+	obs := &captureObserver{}
+
+	// ES256 토큰을 생성하되, JWKS에는 RSA 키를 등록 (kty mismatch 유도)
+	// inlineJWKSProvider를 직접 구성: kid=testKIDEC, kty=RSA, alg=RS256
+	mismatched := &inlineJWKSProvider{
+		entries: map[string]inlineKeyEntry{
+			testKIDEC: {
+				rsaPub: &testKeys.rsaPriv.PublicKey,
+				kty:    "RSA",
+				alg:    "RS256",
+			},
+		},
+	}
+
+	v, err := New(context.Background(), testIssuer, testAudience,
+		WithJWKSProvider(mismatched),
+		WithRejectionObserver(obs),
+	)
+	require.NoError(t, err)
+
+	// ES256으로 서명된 토큰 — alg=ES256이지만 JWKS kty=RSA → cross-check 실패
+	opts := defaultJWTOpts()
+	opts.alg = "ES256"
+	opts.kid = testKIDEC
+	tokenStr := genTestJWT(t, opts)
+
+	_, verErr := v.Verify(context.Background(), tokenStr)
+
+	require.Error(t, verErr, "alg/kty 불일치 시 에러를 반환해야 한다")
+	assert.True(t, errors.Is(verErr, ErrAlgorithmKeyMismatch),
+		"ErrAlgorithmKeyMismatch를 반환해야 한다. got: %v", verErr)
+
+	// SPEC-AX-OBS-001 §2.2: reason 레이블이 정확히 "alg_mismatch"여야 한다
+	require.Len(t, obs.reasons, 1, "rejection이 정확히 1회 기록되어야 한다")
+	assert.Equal(t, "alg_mismatch", obs.reasons[0],
+		"reason 레이블이 spec §2.2 정규값 'alg_mismatch'여야 한다")
+}

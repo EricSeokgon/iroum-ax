@@ -1,5 +1,6 @@
 // middleware.go — /metrics 전용 인증/인가 미들웨어 + HTTP instrumentation
 // SPEC-AX-OBS-001 Sprint 1 GREEN: REQ-OBS-002 + REQ-OBS-003
+// DISPUTE FIX: #4 nested 에러 body, #5 IncAuthzForbidden 호출
 package metrics
 
 import (
@@ -30,13 +31,19 @@ func MetricsHandlerForRegistry(reg prometheus.Gatherer) http.Handler {
 // 처리 순서:
 //  1. Authorization Bearer 토큰 파싱
 //  2. TokenValidator.Verify → authn 실패 시 401
-//  3. IsMetricsAuthorized → authz 실패 시 403
+//  3. IsMetricsAuthorized → authz 실패 시 403 + IncAuthzForbidden 호출
 //  4. auth.WithUser로 context 주입 후 next 호출
 //
 // authEnabled=false이면 인증 없이 통과 (spec §3.3: bypass 허용).
 //
 // @MX:NOTE: [AUTO] /metrics 경로 전용 authn+authz 미들웨어 — BuildRESTChain 외부에서 독립적으로 동작
 func MetricsAuthMiddleware(v *auth.TokenValidator, authEnabled bool) func(http.Handler) http.Handler {
+	return metricsAuthMiddlewareWithMetrics(v, authEnabled, global())
+}
+
+// metricsAuthMiddlewareWithMetrics — 테스트 격리를 위해 Metrics 인스턴스를 주입받는 내부 구현.
+// @MX:NOTE: [AUTO] global() 대신 m 주입 — 테스트에서 isolated registry 사용 시 IncAuthzForbidden 관찰 가능
+func metricsAuthMiddlewareWithMetrics(v *auth.TokenValidator, authEnabled bool, m *Metrics) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !authEnabled || v == nil {
@@ -47,26 +54,32 @@ func MetricsAuthMiddleware(v *auth.TokenValidator, authEnabled bool) func(http.H
 
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				writeMetricsError(w, http.StatusUnauthorized, "missing_authorization")
+				writeMetricsError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Authorization 헤더가 없습니다")
 				return
 			}
 
 			tokenStr, ok := strings.CutPrefix(authHeader, "Bearer ")
 			if !ok {
-				writeMetricsError(w, http.StatusUnauthorized, "invalid_request")
+				writeMetricsError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Bearer 접두사가 없습니다")
 				return
 			}
 
 			vt, err := v.Verify(r.Context(), tokenStr)
 			if err != nil {
-				writeMetricsError(w, http.StatusUnauthorized, "invalid_token")
+				writeMetricsError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "토큰 검증에 실패했습니다")
 				return
 			}
 
 			// ValidatedToken → User 변환
 			u := validatedTokenToMetricsUser(vt)
 			if !IsMetricsAuthorized(u) {
-				writeMetricsError(w, http.StatusForbidden, "forbidden")
+				// AC-OBS-002-4: 403 브랜치에서 authzForbidden 카운터 증가 (DISPUTE #5 fix)
+				role := ""
+				if len(u.Roles) > 0 {
+					role = u.Roles[0]
+				}
+				m.IncAuthzForbidden(role, "/metrics")
+				writeMetricsError(w, http.StatusForbidden, "FORBIDDEN", "metrics 접근 권한이 없습니다")
 				return
 			}
 
@@ -80,15 +93,28 @@ func MetricsAuthMiddleware(v *auth.TokenValidator, authEnabled bool) func(http.H
 func MetricsAuthMiddlewareWithUserInjector(
 	inject func(r *http.Request) (*auth.User, bool),
 ) func(http.Handler) http.Handler {
+	return metricsAuthzOnlyMiddleware(inject, global())
+}
+
+// metricsAuthzOnlyMiddleware — 테스트 격리용 authz 전용 미들웨어 (Metrics 주입).
+func metricsAuthzOnlyMiddleware(
+	inject func(r *http.Request) (*auth.User, bool),
+	m *Metrics,
+) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			u, ok := inject(r)
 			if !ok {
-				writeMetricsError(w, http.StatusUnauthorized, "unauthenticated")
+				writeMetricsError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "인증되지 않은 요청입니다")
 				return
 			}
 			if !IsMetricsAuthorized(u) {
-				writeMetricsError(w, http.StatusForbidden, "forbidden")
+				role := ""
+				if len(u.Roles) > 0 {
+					role = u.Roles[0]
+				}
+				m.IncAuthzForbidden(role, "/metrics")
+				writeMetricsError(w, http.StatusForbidden, "FORBIDDEN", "metrics 접근 권한이 없습니다")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(auth.WithUser(r.Context(), u)))
@@ -125,11 +151,24 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
-// writeMetricsError — /metrics 에러 응답 작성 (JSON body)
-func writeMetricsError(w http.ResponseWriter, code int, errMsg string) {
+// metricsErrorBody — /metrics 에러 응답 nested JSON body 구조
+// AC-OBS-002-3/4: {"error":{"code":"UNAUTHENTICATED|FORBIDDEN","message":"..."}}
+type metricsErrorBody struct {
+	Error metricsErrorDetail `json:"error"`
+}
+
+type metricsErrorDetail struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// writeMetricsError — /metrics 에러 응답 작성 (nested JSON body, DISPUTE #4 fix)
+// code: "UNAUTHENTICATED" 또는 "FORBIDDEN" (AC-OBS-002-3/4)
+func writeMetricsError(w http.ResponseWriter, statusCode int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": errMsg}) //nolint:errcheck // 헤더 전송 후 encode 실패는 복구 불가
+	w.WriteHeader(statusCode)
+	body := metricsErrorBody{Error: metricsErrorDetail{Code: code, Message: message}}
+	_ = json.NewEncoder(w).Encode(body) //nolint:errcheck // 헤더 전송 후 encode 실패는 복구 불가
 }
 
 // validatedTokenToMetricsUser — ValidatedToken에서 auth.User를 구성한다.

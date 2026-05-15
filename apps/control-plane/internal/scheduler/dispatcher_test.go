@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,12 +32,15 @@ func TestMain(m *testing.M) {
 // --- 테스트용 Redis mock 구현 ---
 
 // mockRedisClient RedisClient 인터페이스를 구현하는 테스트 mock
-// 필드 순서: 에러(16바이트) × 2 → 슬라이스(24바이트) → bool(1바이트) (fieldalignment 최적화)
+// 필드 순서: 에러(16바이트) × 2 → 슬라이스(24바이트) → bool(1바이트) → 뮤텍스(8바이트 내부 state)
+// mu는 rpushCalls 동시 접근 보호용 — race detector 통과 필수 (DISPUTE #3 DATA RACE fix)
+// fieldalignment: sync.Mutex는 마지막에 배치 (24B → 0B padding 제거)
 type mockRedisClient struct {
 	pingErr    error
 	rpushErr   error
 	rpushCalls []rpushCall
 	closed     bool
+	mu         sync.Mutex
 }
 
 type rpushCall struct {
@@ -45,6 +49,8 @@ type rpushCall struct {
 }
 
 func (m *mockRedisClient) RPush(ctx context.Context, key string, values ...interface{}) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.closed || m.rpushErr != nil {
 		err := m.rpushErr
 		if m.closed {
@@ -57,10 +63,21 @@ func (m *mockRedisClient) RPush(ctx context.Context, key string, values ...inter
 }
 
 func (m *mockRedisClient) Ping(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.closed {
 		return errors.New("redis: client is closed")
 	}
 	return m.pingErr
+}
+
+// getRpushCalls rpushCalls 슬라이스를 mutex 보호 하에 복사 반환 (race-safe read helper)
+func (m *mockRedisClient) getRpushCalls() []rpushCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]rpushCall, len(m.rpushCalls))
+	copy(cp, m.rpushCalls)
+	return cp
 }
 
 // 골든 파일 경로
@@ -319,10 +336,11 @@ func TestCeleryDispatcher_Dispatch_RedisRPUSH(t *testing.T) {
 
 	// Assert: GREEN — 에러 없이 RPUSH 1회 호출
 	require.NoError(t, err, "정상 dispatch는 에러를 반환하지 않아야 함")
-	require.Len(t, mockRedis.rpushCalls, 1, "RPUSH가 정확히 1회 호출되어야 함")
-	assert.Equal(t, "celery", mockRedis.rpushCalls[0].key,
+	calls := mockRedis.getRpushCalls()
+	require.Len(t, calls, 1, "RPUSH가 정확히 1회 호출되어야 함")
+	assert.Equal(t, "celery", calls[0].key,
 		"기본 queue 이름은 'celery'여야 함")
-	require.Len(t, mockRedis.rpushCalls[0].values, 1, "envelope 1개가 RPUSH되어야 함")
+	require.Len(t, calls[0].values, 1, "envelope 1개가 RPUSH되어야 함")
 }
 
 // TestCeleryDispatcher_Dispatch_CustomQueue
@@ -337,8 +355,9 @@ func TestCeleryDispatcher_Dispatch_CustomQueue(t *testing.T) {
 	err := d.Dispatch(context.Background(), fixedWorkflowID, fixedDocumentID)
 
 	require.NoError(t, err, "커스텀 queue dispatch는 에러를 반환하지 않아야 함")
-	require.Len(t, mockRedis.rpushCalls, 1)
-	assert.Equal(t, "custom_queue", mockRedis.rpushCalls[0].key)
+	calls2 := mockRedis.getRpushCalls()
+	require.Len(t, calls2, 1)
+	assert.Equal(t, "custom_queue", calls2[0].key)
 }
 
 // TestCeleryDispatcher_Dispatch_RedisUnavailable_ReturnsError
@@ -418,7 +437,7 @@ func TestCeleryDispatcher_Dispatch_NoRPUSH_WhenEnvelopeFails(t *testing.T) {
 	// GREEN 검증: ErrEnvelopeSerializationFailed 래핑 + RPUSH 0건
 	assert.ErrorIs(t, err, ErrEnvelopeSerializationFailed,
 		"직렬화 실패 에러가 체인에 포함되어야 함 (AC-CTRL-005-3)")
-	assert.Empty(t, mockRedis.rpushCalls, "직렬화 실패 시 RPUSH가 발생하지 않아야 함")
+	assert.Empty(t, mockRedis.getRpushCalls(), "직렬화 실패 시 RPUSH가 발생하지 않아야 함")
 }
 
 // --- AC-CTRL-005-1 골든 파일 구조 검증 ---

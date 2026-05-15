@@ -226,7 +226,8 @@ func (v *TokenValidator) Verify(ctx context.Context, tokenString string) (*Valid
 
 	// d. SF-2 kty/alg cross-check
 	if err := checkAlgKTYConsistency(alg, kty); err != nil {
-		v.recordRejection("algorithm_key_mismatch")
+		// SPEC-AX-OBS-001 §2.2: reason 레이블 정규 집합 {invalid_issuer, alg_mismatch, expired, blacklist}
+		v.recordRejection("alg_mismatch")
 		return nil, err
 	}
 	_ = jwksAlg // jwksAlg는 kty cross-check에 의존하므로 별도 사용 없음
