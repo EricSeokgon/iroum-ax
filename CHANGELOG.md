@@ -7,6 +7,31 @@
 
 ## [Unreleased] - 2026-05-15
 
+### Added — SPEC-AX-AUTH-002 v0.1.2 (RBAC REST/gRPC Handler 통합)
+- **Sprint 0+1+2 (통합)**: 메서드-권한 매핑 테이블 + RESTAuthzMiddleware + UnaryAuthzInterceptor + 체인 조합 헬퍼
+  - `LookupRESTPermission` / `LookupGRPCPermission` (경로 매개변수 매칭)
+  - `BuildRESTChain` (auth → authz → handler 순서 강제)
+  - `BuildGRPCInterceptorChain` (ChainUnaryInterceptor)
+  - 28+ 단위 테스트, 신규 함수 90-100% 커버리지
+- **Sprint 3 E2E**: testcontainers Postgres+Redis 5 신규 + 1 차단 해제 = 6 통과
+  - TestE2E_Authz_AdminFullAccess / ViewerForbidden_POST / AnalystWriteAllowed / AuthDisabled_BypassesAuthz / GRPC_ViewerForbidden_Create
+  - AUTH-001 TestE2E_Auth_RBACForbidden SKIP 제거 (grep count=0)
+
+### Quality (계속)
+- **테스트**: AUTH-002 28 unit + 6 E2E = 34 신규, 누적 ~410+
+- **TRUST 5**: PASS (Tested ≥ 0.85 / Readable / Unified / Secured ≥ 0.85 / Trackable)
+  - plan-auditor iter 1 FAIL 0.74 → iter 2 PASS 0.92 (7개 결함 해소)
+  - evaluator-active iter 1 DISPUTE 0.7505 → iter 3 CONFIRM 0.8415 (보안 필수 0.85 ≥ 0.75)
+
+### Security (계속)
+- **기본값-거부 안전장치**: 매핑 미정의 메서드 → 503 AUTHZ_MAPPING_MISSING (200 절대 금지)
+- **AUTH-001 통합**: RBAC 라이브러리 + REST/gRPC 핸들러 엔트리 포인트 통합 완료
+- **체인 순서 강제**: auth → authz → handler 순서 강제 (BuildRESTChain / BuildGRPCInterceptorChain)
+- **viewer 차단**: DELETE/POST 시도 사전 차단 + AUTH_FORBIDDEN audit row
+
+### Fixed
+- AUTH-001 SKIP'd TestE2E_Auth_RBACForbidden을 SPEC-AX-AUTH-002 Sprint 3에서 차단 해제
+
 ### Added — SPEC-AX-AUTH-001 v0.1.1 (SSO/JWT 인증 + RBAC + OAuth 2.0 BCP)
 
 #### Sprint 0: Auth Foundation (Go 3 의존성 + Python 2 의존성)

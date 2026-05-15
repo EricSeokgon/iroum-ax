@@ -5,8 +5,8 @@
 [![License: Private](https://img.shields.io/badge/License-Private-red.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](pyproject.toml)
 [![Go](https://img.shields.io/badge/go-1.22-00ADD8.svg)](go.mod)
-[![Tests](https://img.shields.io/badge/tests-380+_passing-brightgreen.svg)](#)
-[![SPEC](https://img.shields.io/badge/SPECs-3_GREEN-purple.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-410+_passing-brightgreen.svg)](#)
+[![SPEC](https://img.shields.io/badge/SPECs-4_GREEN-purple.svg)](#)
 [![Security](https://img.shields.io/badge/Algorithm_Confusion_Attack-Defended-blue.svg)](#)
 
 > 한국 공공기관 경영평가 보고서 자동화 AI 플랫폼 — KEPCO E&C anchor
@@ -39,11 +39,18 @@ KEPCO E&C anchor 고객 대상 경영평가 자동화 플랫폼. HWP 문서 수�
 - OAuth 2.0 BCP (refresh token rotation + family invalidation)
 - 4 E2E PASS + 1 SKIP (REST handler SPEC-AX-AUTH-002 연기)
 
+**Go RBAC REST/gRPC Handler** (SPEC-AX-AUTH-002 v0.1.2)
+- 34개 신규 테스트 (28 unit + 6 E2E)
+- default-deny 안전장치 (매핑 미정의 → 503 AUTHZ_MAPPING_MISSING)
+- 체인 순서 강제 (auth → authz → handler)
+- AUTH-001 SKIP unblock (grep count=0)
+- plan-auditor PASS 0.92 + evaluator-active CONFIRM 0.8415
+
 **품질**
 - TRUST 5 PASS (모든 5가지 차원): Tested ✓ | Readable ✓ | Unified ✓ | Secured ✓ | Trackable ✓
-- plan-auditor PASS (0.88점), evaluator-active CONFIRM (0.782점)
-- 55개 @MX 태그 (40 ANCHOR + 10 NOTE + 5 WARN)
-- **총 380+ 테스트 (Python 192 + Go 156 + 11 integration + 21 E2E), 50+ 커밋**
+- plan-auditor PASS 0.92 (iter 2), evaluator-active CONFIRM 0.8415 (iter 3)
+- 66개 @MX 태그 (44 ANCHOR + 13 NOTE + 9 WARN)
+- **총 410+ 테스트 (Python 192 + Go 190 + 11 integration + 27 E2E), 55+ 커밋**
 
 ## 빠른 시작
 

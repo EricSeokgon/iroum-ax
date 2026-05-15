@@ -4,6 +4,22 @@ REQ-UBI + REQ-AX-001~005 (Python) + REQ-CTRL-001~005 (Go) + REQ-AUTH-001~005 (Go
 
 ---
 
+## SPEC-AX-AUTH-002: RBAC REST/gRPC Handler 통합 (새로 추가)
+
+### AUTH-002 고유 요구사항
+
+| REQ ID | 설명 | 구현 위치 | 테스트 | 상태 |
+|--------|------|---------|--------|------|
+| REQ-AUTH2-001-U1 | REST/gRPC 메서드-권한 매핑 | `internal/auth/authz_mapping.go` | `authz_mapping_test.go` (5 tests) | PASS |
+| REQ-AUTH2-002 | RESTAuthzMiddleware 차단 결정 | `internal/auth/authz_middleware.go` | `authz_middleware_test.go` (8 tests) | PASS |
+| REQ-AUTH2-003 | UnaryAuthzInterceptor (gRPC 차단) | `internal/auth/authz_middleware.go` | `authz_middleware_test.go` (8 tests) | PASS |
+| REQ-AUTH2-004 | 체인 조합 순서 강제 (auth → authz → handler) | `internal/auth/chain.go` | `chain_test.go` (2 tests) | PASS |
+| REQ-AUTH2-UBI-001 | default-deny 안전장치 (매핑 미정의 → 503) | `internal/auth/authz_middleware.go:240` | E2E 6개 + 단위 5개 | PASS |
+
+**테스트 합계**: 28개 단위 + 6개 E2E = 34개 신규 (모두 PASS, AUTH-001 SKIP 차단 해제)
+
+---
+
 ## SPEC-AX-CTRL-001: Go Control Plane 요구사항
 
 ### Control Plane 고유 요구사항
