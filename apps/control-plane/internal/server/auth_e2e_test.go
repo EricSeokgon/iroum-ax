@@ -17,9 +17,9 @@
 //   - AC-AUTH-UBI-001-C: cli-anonymous 폴백 확인
 //   - TestE2E_Auth_ConcurrentRequests: 5개 goroutine, 서로 다른 user_id → 격리 확인
 //
-// AC-AUTH-E2E-3 (RBAC Forbidden) 결정:
-// Option B 선택 — RBAC 라이브러리(Sprint 5)는 완성, REST 핸들러 연동은 SPEC-AX-AUTH-002 후속
-// TestE2E_Auth_RBACForbidden은 t.Skip()으로 마킹, TODO 주석으로 근거 문서화
+// AC-AUTH-E2E-3 (RBAC Forbidden):
+// SPEC-AX-AUTH-002 Sprint 3에서 활성화 (AC-AUTH2-004-Sprint7-Unblock)
+// SKIP 제거 — BuildRESTChain 완성으로 viewer DELETE → 403 검증 가능
 package server_test
 
 import (
@@ -351,23 +351,81 @@ func TestE2E_Auth_AnonymousFallback(t *testing.T) {
 		"AC-AUTH-E2E-2: AuthEnabled=false → audit_logs.user_id = 'cli-anonymous'")
 }
 
-// TestE2E_Auth_RBACForbidden AC-AUTH-E2E-3 (SKIP — SPEC-AX-AUTH-002 후속)
+// TestE2E_Auth_RBACForbidden AC-AUTH-E2E-3 (AC-AUTH2-004-Sprint7-Unblock)
 //
-// 결정: Option B — RBAC 라이브러리(Sprint 5)는 완성, REST 핸들러 연동은 별도 SPEC 범위
+// SPEC-AX-AUTH-002 Sprint 3에서 활성화:
+//   - BuildRESTChain (auth.RESTMiddleware → RESTAuthzMiddleware → handler) 완성
+//   - viewer 토큰 → DELETE /api/v1/workflows/{id} → 403 Forbidden 검증
+//   - SKIP 제거: AC-AUTH2-004-Sprint7-Unblock 충족
 //
-// TODO(SPEC-AX-AUTH-002): RESTHandler.Mux()에 RBAC Authorize 미들웨어 연동 후 활성화
+// Given:
+//   - authEnabled=true, scope=iroum-ax:viewer
+//   - BuildRESTChain으로 감싼 REST 스택
 //
-//	구현 위치: rest_handler.go 또는 별도 authz_middleware.go
-//	필요 작업:
-//	  1. auth.Authorize(ctx, method, path) 를 각 핸들러 진입 시 호출
-//	  2. ErrInsufficientPermission → 403 Forbidden + AUTH_FORBIDDEN audit
-//	  3. viewer 토큰으로 DELETE → 403 검증
-//	이 테스트는 SPEC-AX-AUTH-002 Sprint 1에서 활성화
+// When: DELETE /api/v1/workflows/{id} with viewer token
+//
+// Then:
+//   - HTTP 403 Forbidden
+//   - WWW-Authenticate 헤더 존재
+//   - workflows 테이블 변화 없음
 func TestE2E_Auth_RBACForbidden(t *testing.T) {
-	// RBAC-REST 연동은 SPEC-AX-AUTH-002로 이관 (Option B 결정)
-	// 이유: Sprint 7 범위는 validator + middleware + audit 체인 검증에 집중
-	//       RBAC 핸들러 연동은 독립 SPEC으로 분리하여 scope discipline 유지
-	t.Skip("SPEC-AX-AUTH-002: RBAC REST handler wiring deferred — see TODO above")
+	defer goleak.VerifyNone(t, e2eGoLeakOptions...)
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	cfg := &e2eAuthConfig{
+		issuer:      "https://test-keycloak.local/realms/iroum-ax",
+		audience:    "iroum-ax-control-plane",
+		kid:         "e2e-rbac-forbidden-key",
+		privateKey:  privateKey,
+		authEnabled: true,
+	}
+
+	// setupAuthzE2EStack: BuildRESTChain 사용 (auth + authz 체인)
+	stack := setupAuthzE2EStack(t, cfg)
+	ctx := context.Background()
+
+	// viewer 토큰 생성 (delete:workflow 권한 없음)
+	viewerToken := genE2ETestJWT(t, cfg, map[string]interface{}{
+		"sub":   "viewer-rbac-forbidden-001",
+		"scope": "iroum-ax:viewer",
+	})
+
+	// 테스트 전 workflows 개수 확인
+	var beforeCount int
+	err = stack.queryFn(ctx, "SELECT COUNT(*) FROM workflows").Scan(&beforeCount)
+	require.NoError(t, err)
+
+	// DELETE /api/v1/workflows/{id} — 존재하지 않는 ID도 무관 (인가 차단이 먼저)
+	fakeID := uuid.New().String()
+	deleteCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(deleteCtx, http.MethodDelete,
+		stack.ts.URL+"/api/v1/workflows/"+fakeID, nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+viewerToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// HTTP 403 확인 (viewer는 delete:workflow 권한 없음)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode,
+		"AC-AUTH-E2E-3: viewer DELETE → HTTP 403이어야 함 (RBAC 차단)")
+
+	// WWW-Authenticate 헤더 존재 확인
+	wwwAuth := resp.Header.Get("WWW-Authenticate")
+	assert.NotEmpty(t, wwwAuth, "AC-AUTH-E2E-3: WWW-Authenticate 헤더가 있어야 함")
+	assert.Contains(t, wwwAuth, "Bearer", "WWW-Authenticate 헤더에 Bearer 포함")
+
+	// workflows 테이블 변화 없음 (인가 차단 → 비즈니스 로직 미실행)
+	var afterCount int
+	err = stack.queryFn(ctx, "SELECT COUNT(*) FROM workflows").Scan(&afterCount)
+	require.NoError(t, err)
+	assert.Equal(t, beforeCount, afterCount,
+		"AC-AUTH-E2E-3: RBAC 차단 시 workflows 행이 변경되어서는 안 됨")
 }
 
 // TestE2E_Auth_InvalidToken_401 AC-AUTH-E2E-4
