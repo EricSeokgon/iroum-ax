@@ -88,8 +88,10 @@ func TestCeleryDispatcher_BuildEnvelope_GoldenFileMatch(t *testing.T) {
 	mockRedis := &mockRedisClient{}
 	d := NewCeleryDispatcher(mockRedis, "celery", fixedHostname)
 
-	goldenBytes, err := os.ReadFile(goldenFilePath)
-	require.NoError(t, err, "골든 파일 읽기 실패: %s", goldenFilePath)
+	// user_id 포함 골든 파일 (goldenAnonPath = celery_envelope_v2_anon.json)
+	// Sprint 4 이후 BuildEnvelope는 user_id 필드를 포함하므로 anon 골든 파일 사용
+	goldenBytes, err := os.ReadFile(goldenAnonPath)
+	require.NoError(t, err, "골든 파일 읽기 실패: %s", goldenAnonPath)
 
 	// Go의 encoding/json은 map key를 알파벳 순 정렬하므로 정규화된 비교 수행
 	var goldenEnvelope map[string]interface{}
@@ -98,7 +100,7 @@ func TestCeleryDispatcher_BuildEnvelope_GoldenFileMatch(t *testing.T) {
 	require.NoError(t, err)
 
 	// Act
-	got, err := d.BuildEnvelope(fixedWorkflowID, fixedDocumentID, fixedDeliveryTag, fixedReplyTo)
+	got, err := d.BuildEnvelope(fixedWorkflowID, fixedDocumentID, fixedDeliveryTag, fixedReplyTo, defaultAnonUserID)
 
 	// Assert: GREEN — 실제 구현이 정상 동작해야 함
 	require.NoError(t, err, "BuildEnvelope가 에러 없이 완료되어야 함")
@@ -109,7 +111,7 @@ func TestCeleryDispatcher_BuildEnvelope_GoldenFileMatch(t *testing.T) {
 	normalizedGot, err := json.Marshal(gotEnvelope)
 	require.NoError(t, err)
 	assert.Equal(t, string(normalizedGolden), string(normalizedGot),
-		"envelope이 골든 파일과 일치해야 함")
+		"envelope이 골든 파일(anon)과 일치해야 함")
 }
 
 // TestCeleryDispatcher_BuildEnvelope_RequiredFields
@@ -123,7 +125,7 @@ func TestCeleryDispatcher_BuildEnvelope_RequiredFields(t *testing.T) {
 	d := NewCeleryDispatcher(mockRedis, "celery", fixedHostname)
 
 	// Act
-	got, err := d.BuildEnvelope(fixedWorkflowID, fixedDocumentID, fixedDeliveryTag, fixedReplyTo)
+	got, err := d.BuildEnvelope(fixedWorkflowID, fixedDocumentID, fixedDeliveryTag, fixedReplyTo, defaultAnonUserID)
 
 	// Assert: GREEN — 에러 없이 필수 필드 포함
 	require.NoError(t, err, "BuildEnvelope가 에러 없이 완료되어야 함")
@@ -169,7 +171,7 @@ func TestCeleryDispatcher_BuildEnvelope_BodyBase64Decodable(t *testing.T) {
 	mockRedis := &mockRedisClient{}
 	d := NewCeleryDispatcher(mockRedis, "celery", fixedHostname)
 
-	got, err := d.BuildEnvelope(fixedWorkflowID, fixedDocumentID, fixedDeliveryTag, fixedReplyTo)
+	got, err := d.BuildEnvelope(fixedWorkflowID, fixedDocumentID, fixedDeliveryTag, fixedReplyTo, defaultAnonUserID)
 
 	// GREEN — 에러 없이 body 구조 검증
 	require.NoError(t, err, "BuildEnvelope가 에러 없이 완료되어야 함")
@@ -216,7 +218,7 @@ func TestCeleryDispatcher_BuildEnvelope_ArgsKwargsRepr(t *testing.T) {
 	mockRedis := &mockRedisClient{}
 	d := NewCeleryDispatcher(mockRedis, "celery", fixedHostname)
 
-	got, err := d.BuildEnvelope(fixedWorkflowID, fixedDocumentID, fixedDeliveryTag, fixedReplyTo)
+	got, err := d.BuildEnvelope(fixedWorkflowID, fixedDocumentID, fixedDeliveryTag, fixedReplyTo, defaultAnonUserID)
 
 	// GREEN — 에러 없이 argsrepr/kwargsrepr 검증
 	require.NoError(t, err, "BuildEnvelope가 에러 없이 완료되어야 함")
@@ -460,7 +462,8 @@ func TestCeleryEnvelopeGoldenFile_StructureValid(t *testing.T) {
 func TestCeleryEnvelopeGoldenFile_KeysAlphabeticalOrder(t *testing.T) {
 	t.Parallel()
 
-	data, err := os.ReadFile(goldenFilePath)
+	// user_id 포함 anon 골든 파일로 17개 headers 검증 (Sprint 4 이후)
+	data, err := os.ReadFile(goldenAnonPath)
 	require.NoError(t, err)
 
 	// json.Unmarshal 후 re-marshal이 idempotent한지 검증 (round-trip 안정성)
@@ -484,7 +487,7 @@ func TestCeleryEnvelopeGoldenFile_KeysAlphabeticalOrder(t *testing.T) {
 	// headers 필드가 존재하고 16개 키를 보유하는지 확인 (골든 파일 완전성)
 	headers, ok := envelope["headers"].(map[string]interface{})
 	require.True(t, ok)
-	assert.Len(t, headers, 16, "headers에 Kombu v2 필수 16개 키가 있어야 함")
+	assert.Len(t, headers, 17, "headers에 Kombu v2 필수 16개 키 + user_id 1개 = 17개 키가 있어야 함")
 }
 
 // --- AC-CTRL-005-4: Dispatch 레이턴시 벤치마크 ---

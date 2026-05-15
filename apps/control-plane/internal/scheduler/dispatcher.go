@@ -83,8 +83,8 @@ func (d *CeleryDispatcher) Dispatch(ctx context.Context, workflowID, documentID 
 			return fmt.Errorf("dispatch envelope build failed: %w", err)
 		}
 	} else {
-		// 기본 BuildEnvelope 사용: deliveryTag와 replyTo는 workflowID 기반 생성
-		envelopeBytes, err = d.BuildEnvelope(workflowID, documentID, workflowID, workflowID)
+		// 기본 BuildEnvelope 사용: deliveryTag와 replyTo는 workflowID 기반 생성, userID 기본값 ""
+		envelopeBytes, err = d.BuildEnvelope(workflowID, documentID, workflowID, workflowID, "")
 		if err != nil {
 			return fmt.Errorf("dispatch envelope build failed: %w", err)
 		}
@@ -98,18 +98,28 @@ func (d *CeleryDispatcher) Dispatch(ctx context.Context, workflowID, documentID 
 	return nil
 }
 
+// resolveUserID 빈 userID를 "cli-anonymous"로 폴백한다 (REQ-AUTH-UBI-001 backward compat).
+func resolveUserID(userID string) string {
+	if userID == "" {
+		return "cli-anonymous"
+	}
+	return userID
+}
+
 // BuildEnvelope Kombu 호환 Celery JSON envelope v2 직렬화
-// 결정적 입력(workflowID, documentID, deliveryTag, replyTo)을 받아 byte 배열 반환
+// 결정적 입력(workflowID, documentID, deliveryTag, replyTo, userID)을 받아 byte 배열 반환
+// userID가 빈 문자열인 경우 "cli-anonymous"로 폴백 (REQ-AUTH-UBI-001 backward compat).
 // 테스트에서 고정 값을 주입하여 golden file 비교 가능하도록 설계
 //
 // @MX:ANCHOR: [AUTO] Celery envelope 직렬화 계약 — golden file이 유일한 진실
 // @MX:REASON: TestCeleryDispatcher_BuildEnvelope_GoldenFileMatch가 byte-exact match 요구
-// @MX:SPEC: REQ-CTRL-005, AC-CTRL-005-1
+// @MX:SPEC: REQ-CTRL-005, AC-CTRL-005-1, REQ-AUTH-UBI-001
 func (d *CeleryDispatcher) BuildEnvelope(
 	workflowID string,
 	documentID string,
 	deliveryTag string,
 	replyTo string,
+	userID string,
 ) ([]byte, error) {
 	const taskName = "pipelines.workers.ingestion_worker.run"
 
@@ -144,7 +154,7 @@ func (d *CeleryDispatcher) BuildEnvelope(
 	// origin: "go-control-plane@<hostname>"
 	origin := "go-control-plane@" + d.hostname
 
-	// headers: Kombu v2 필수 16개 필드
+	// headers: Kombu v2 필수 16개 필드 + user_id (REQ-AUTH-UBI-001)
 	headers := map[string]interface{}{
 		"argsrepr":      argsRepr,
 		"eta":           nil,
@@ -162,6 +172,7 @@ func (d *CeleryDispatcher) BuildEnvelope(
 		"shadow":        nil,
 		"task":          taskName,
 		"timelimit":     []interface{}{nil, nil},
+		"user_id":       resolveUserID(userID),
 	}
 
 	// properties: 메시지 전달 메타데이터

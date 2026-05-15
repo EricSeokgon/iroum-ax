@@ -1,13 +1,20 @@
-"""FastAPI 인증 Dependency stub — SPEC-AX-AUTH-001 REQ-AUTH-003-E3
+"""FastAPI 인증 Dependency — SPEC-AX-AUTH-001 REQ-AUTH-003-E3
 
-Sprint 4 GREEN에서 실제 구현 예정.
+verify_token: Bearer 토큰 검증 후 ValidatedToken 반환.
+AuthEnabled=false 시 cli-anonymous 폴백 (REQ-AUTH-UBI-001 backward compat).
+
+# @MX:ANCHOR: [AUTO] FastAPI Depends 인증 진입점
+# @MX:REASON: 모든 protected endpoint에서 호출 예상 (fan_in >= 5)
+# @MX:SPEC: SPEC-AX-AUTH-001 REQ-AUTH-003-E3
 """
 from __future__ import annotations
 
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from pipelines.auth.errors import AuthError
 from pipelines.auth.models import ValidatedToken
+from pipelines.auth.validator import TokenValidator
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -18,7 +25,7 @@ async def verify_token(
     """FastAPI Depends — Bearer 토큰을 검증하고 ValidatedToken을 반환한다.
 
     AuthEnabled=false 시: cli-anonymous 사용자로 폴백 (backward compat).
-    AuthEnabled=true 시: TokenValidator.verify 호출 (Sprint 4 GREEN에서 구현).
+    AuthEnabled=true 시: TokenValidator.verify 호출.
 
     Args:
         credentials: HTTPBearer scheme에서 추출된 자격증명
@@ -31,16 +38,21 @@ async def verify_token(
 
     # @MX:ANCHOR: [AUTO] Python 측 인증 진입점 (FastAPI Depends)
     # @MX:REASON: 모든 protected endpoint에서 호출 (fan_in >= 5)
-    # @MX:TODO Sprint 4 — settings.auth_enabled 확인 후 TokenValidator.verify 연동
     """
-    from pipelines.config.settings import settings  # 순환 임포트 방지 위해 지연 임포트
+    # 순환 임포트 방지 위해 지연 임포트 (settings는 모듈 수준 reload 가능)
+    import importlib
 
-    if not settings.auth_enabled:
+    import pipelines.config.settings as cfg_mod
+
+    importlib.reload(cfg_mod)
+    current_settings = cfg_mod.settings
+
+    if not current_settings.auth_enabled:
         # AuthEnabled=false: cli-anonymous 폴백 (R-AUTH-007 backward compat)
         from datetime import datetime, timedelta, timezone
 
         return ValidatedToken(
-            subject="cli-anonymous",
+            subject=current_settings.default_user_id,
             issuer="",
             audience=[],
             scopes=[],
@@ -48,7 +60,7 @@ async def verify_token(
             claims={},
         )
 
-    # AuthEnabled=true: Sprint 4에서 구현
+    # AuthEnabled=true: Bearer 헤더 필수
     if credentials is None:
         raise HTTPException(
             status_code=401,
@@ -56,7 +68,20 @@ async def verify_token(
             headers={"WWW-Authenticate": 'Bearer realm="iroum-ax", error="invalid_request"'},
         )
 
-    raise HTTPException(
-        status_code=501,
-        detail="구현 예정: Sprint 4 GREEN",
+    # TokenValidator 생성 후 검증
+    validator = TokenValidator(
+        oidc_issuer=current_settings.oidc_issuer_url,
+        audience=current_settings.oidc_audience,
+        clock_skew=current_settings.clock_skew_seconds,
     )
+
+    try:
+        return validator.verify(credentials.credentials)
+    except AuthError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail=str(exc),
+            headers={
+                "WWW-Authenticate": 'Bearer realm="iroum-ax", error="invalid_token"',
+            },
+        ) from exc
