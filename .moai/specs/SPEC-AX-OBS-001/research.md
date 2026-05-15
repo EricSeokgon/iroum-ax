@@ -15,6 +15,9 @@
 | `scheduler.CeleryDispatcher.Dispatch` | `(ctx,workflowID,documentID string) error` (nil/`ErrDispatchFailed`) | `dispatcher.go:70` |
 | `server.RESTHandler.Mux()` / `WorkflowService` | `http.Handler` / `proto.WorkflowServiceServer` | `rest_handler.go:94`, `grpc_server.go:36` |
 | `cmd/server` `Server.Run()` | `package main`, `outerMux` (`/health`·`/ready` chain 외부 mount, L184~195) | `server.go:171` |
+| `auth.TokenValidator.Verify` reject 분기 | `auth_rejections_total` source — `ErrTokenInvalidIssuer`:279 / `ErrAlgorithmKeyMismatch`:370 / `ErrTokenExpired`:248,257,264 / `ErrTokenBlacklisted`:291; `New`/options additive 패턴(L115~176) | `validator.go:197~314` |
+| `auth` 패키지 import | `context/crypto/encoding/errors/fmt/strings/time/golang-jwt` — **metrics 미import**(순환 회피 DI 전제) | `validator.go:1~17`, `middleware.go:1~16` |
+| `workflow.StateMachine` | `Start`:82 / `Complete`:123 / `Fail`:163 (각 `tx.Commit` 성공 후 nil); 패키지 import `context/fmt/sync/cperrors/types/zap`만 — **auth/metrics 미import** | `workflow/state_machine.go:82~204` |
 | `config.Config` | OTel/metrics 필드 **부재** (S0 추가 대상) | `config.go:12~99` |
 | `go.mod` | `prometheus/client_golang` **부재**; `go.opentelemetry.io/otel v1.43.0` family **indirect** | `go.mod:9,65~69` |
 
@@ -69,6 +72,33 @@ PgPool 갱신 goroutine + OTel tracer flush가 SERVER-001 `Server.shutdown`(sync
 | prometheus 신규 의존성 transitive 충돌 | S0 `go mod verify` + 전체 build |
 | shutdown goroutine leak | root ctx 파생 + goleak (§6) |
 | 계측 overhead > 1ms | atomic-only hot path, `BenchmarkInstrumentHTTP` 게이트 |
+| `auth → metrics → auth` 순환 import | Dependency Inversion — `RejectionObserver` auth 내 정의, metrics 구현, server.go DI (§9.2). `go list -deps` 단언 (AC-OBS-001-4) |
+| workflow observer 과적용 | 순환 부재 검증 후 직접 import 채택 (§9.3) — over-engineering 회피 |
+
+## 9. Circular Import Decision — auth_rejections_total 수집 경로 (evaluator iter 3 Moderate)
+
+### 9.1 문제 (코드로 재확인)
+
+`iroum_ax_auth_rejections_total`의 유일한 source는 `auth.TokenValidator.Verify`의 reject 분기다 (검증: `internal/auth/validator.go:197~314` — `ErrTokenInvalidIssuer`:279, `ErrAlgorithmKeyMismatch`:370, `ErrTokenExpired`:248/257/264, `ErrTokenBlacklisted`:291). 이 counter를 증가시키려면 auth가 `metrics.IncAuthRejection(reason)`를 호출해야 한다 → `auth → metrics`.
+
+그런데 `internal/metrics/permission.go`가 `MetricsAuthMiddleware`를 위해 이미 `auth`를 import한다 → `metrics → auth`. 따라서 직접 호출은 **`auth → metrics → auth` compile-time 순환 import**(Go 금지). v0.1.1 §2.1에 `internal/auth/middleware.go`가 affected files에 없던 것은 이 제약의 결과였으나, SPEC이 해결 방안을 명시하지 않아 `auth_rejections_total`이 dead counter(운영 brute-force 미탐지)로 남는 명세-코드 gap이었다.
+
+### 9.2 옵션 평가
+
+| 옵션 | 설명 | 단점 | 판정 |
+|------|------|------|------|
+| **A. auth가 metrics 직접 import** | `Verify`에서 `metrics.IncAuthRejection` 직접 호출 | compile-time 순환 import (Go 빌드 불가) | **기각 (불가능)** |
+| **B. Dependency Inversion** | `RejectionObserver` interface를 **auth 패키지 내** 정의, metrics가 구현, server.go가 DI 주입 | RBAC 진실 분산 없음; auth↔metrics 단방향; 추가 wire 1지점 | **채택** |
+| **C. 별도 중립 패키지로 counter 이동** | `internal/obscounters` 신설 후 auth/metrics 양쪽이 import | 신규 패키지 + collector 분산 + metrics 응집 붕괴 | 기각 (과한 구조 변경) |
+| **D. auth_rejections_total 삭제** | counter 자체를 제거 | 운영 brute-force 탐지 불가 — tech.md §8/§11.2 SLA 요구 위배 | 기각 |
+
+**채택: Option B (Dependency Inversion).** 근거: (1) Go 인터페이스는 구조적 만족이므로 `RejectionObserver`를 auth 패키지에 정의하면 auth는 metrics를 import하지 않고도 hook을 호출할 수 있다. (2) metrics는 그 interface를 구현하되 interface 만족을 위해 auth를 신규 import할 필요가 없다(metrics→auth는 `MetricsAuthMiddleware`로 이미 단방향 존재, 추가 의존 0). (3) DI wire는 `cmd/server/server.go`(`package main`, auth+metrics 모두 import) 단일 지점 — 의존 그래프상 자연스럽다. (4) `WithRejectionObserver`는 기존 `WithIssuer/WithAudience/...`와 동일한 additive ValidatorOption 패턴이라 `auth.New`/`Verify` 시그니처가 불변 → AUTH-001 기존 호출부(RESTMiddleware:182, UnaryServerInterceptor:131, 테스트) 전부 무영향, frozen `rbac.go`도 미접촉. 최종 의존 방향: **auth(interface 정의) ← metrics(구현) ← server.go(wire)**, `auth → metrics` 간선 부재 → no cycle. `go list -deps`로 단언(AC-OBS-001-4).
+
+### 9.3 workflow_state_transitions_total — 직접 import 결정 (over-engineering 회피)
+
+`internal/workflow/state_machine.go`의 import는 `context/fmt/sync/cperrors(internal/errors)/types(internal/types)/zap`만이다(검증됨 — auth/metrics 미import). `metrics`도 `auth`도 `workflow`를 import하지 않으므로 `workflow → metrics` 직접 import는 어떤 순환도 만들지 않는다.
+
+**결정: workflow는 metrics를 직접 import (observer 패턴 미적용).** 근거: 순환이 실재하지 않는데 auth와 "일관성"을 명목으로 동일 DI 패턴을 적용하면 zero-benefit 추상화 — Agent Core Behavior #4 (Enforce Simplicity) + lesson(단순성) 위배. observer/DI는 **실재 순환을 푸는 도구**이지 기본 패턴이 아니다. `StateMachine.Start`(L117 Commit 성공 후)/`Complete`(L156)/`Fail`(L202)에서 `metrics.IncWorkflowTransition(from, to)`를 직접 호출하며 from/to는 bounded `types.WorkflowState`(PENDING/RUNNING/COMPLETED/FAILED)로 cardinality-safe다. (REQ-OBS-001-S3, AC-OBS-001-5.)
 
 ## 8. Cross-SPEC artifacts affected (lessons #5)
 
