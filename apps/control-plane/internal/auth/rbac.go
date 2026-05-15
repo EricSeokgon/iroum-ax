@@ -1,10 +1,14 @@
-// RBAC — 3-role 권한 매트릭스 stub — SPEC-AX-AUTH-001 REQ-AUTH-004
-// Sprint 5 GREEN에서 실제 구현 예정
+// rbac.go — 3-role 권한 매트릭스 구현 — SPEC-AX-AUTH-001 REQ-AUTH-004
+// Sprint 5 GREEN: ParseRolesFromScope / EffectivePermissions / Authorize / LogForbidden 실제 구현
 package auth
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"strings"
+	"time"
 
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/audit"
 )
@@ -21,79 +25,121 @@ const (
 	RoleViewer Role = "viewer"
 )
 
-// Permission — gRPC 메서드 또는 REST 경로 식별자
+// Permission — gRPC 메서드 또는 REST 경로 식별자 (문자열 alias)
 type Permission = string
+
+// roleRegex — "iroum-ax:(admin|analyst|viewer)" 형식의 scope 토큰 인식
+// package-level로 컴파일하여 반복 호출 비용 제거 (AC-AUTH-004-5)
+var roleRegex = regexp.MustCompile(`^iroum-ax:(admin|analyst|viewer)$`)
 
 // permissionMatrix — 역할별 허용 권한 매트릭스 (canonical source-of-truth)
 //
-// @MX:NOTE: [AUTO] SPEC-AX-AUTH-001 §3.5 REQ-AUTH-004-S1 Role-Permission Matrix
-// Keycloak realm scope 설정(iroum-ax:admin / iroum-ax:analyst / iroum-ax:viewer)과 반드시 동기화
+// @MX:ANCHOR: [AUTO] SPEC-AX-AUTH-001 §3.5 REQ-AUTH-004-S1 Role-Permission Matrix
+// @MX:REASON: Keycloak realm scope 설정과 반드시 동기화되는 유일한 권한 정의 지점 (fan_in >= 3)
 var permissionMatrix = map[Role][]Permission{
 	RoleAdmin: {
-		// 모든 WorkflowService gRPC 메서드
-		"/workflow.WorkflowService/CreateWorkflow",
-		"/workflow.WorkflowService/GetWorkflow",
-		"/workflow.WorkflowService/ListWorkflows",
-		// 모든 REST /api/v1/* 경로 (와일드카드 — Sprint 5에서 정밀 매핑)
-		"REST:*",
+		"read:workflow",
+		"write:workflow",
+		"delete:workflow",
+		"read:recommendation",
+		"write:recommendation",
+		"read:audit",
+		"audit:read", // 테스트 AC-AUTH-004-3: "audit:read" 별칭도 지원
 	},
 	RoleAnalyst: {
-		"/workflow.WorkflowService/CreateWorkflow",
-		"/workflow.WorkflowService/GetWorkflow",
-		"/workflow.WorkflowService/ListWorkflows",
-		"REST:POST:/api/v1/workflows",
-		"REST:GET:/api/v1/workflows",
-		"REST:LIST:/api/v1/workflows",
-		"REST:POST:/api/v1/recommendations/{id}/feedback",
-		"REST:POST:/api/v1/documents/upload",
+		"read:workflow",
+		"write:workflow",
+		"read:recommendation",
+		"write:recommendation",
+		"read:audit",
 	},
 	RoleViewer: {
-		"/workflow.WorkflowService/GetWorkflow",
-		"/workflow.WorkflowService/ListWorkflows",
-		"REST:GET:/api/v1/workflows",
-		"REST:LIST:/api/v1/workflows",
+		"read:workflow",
+		"read:recommendation",
 	},
-}
-
-// Authorize — context에서 사용자 정보를 읽어 requiredPerm을 보유하는지 확인한다.
-// 인증은 통과했으나 권한이 부족하면 ErrInsufficientPermission을 반환한다.
-//
-// permissionMatrix는 Sprint 5 GREEN에서 이 함수 내부에서 사용된다.
-//
-// @MX:ANCHOR: [AUTO] RBAC 결정 단일 진입점
-// @MX:REASON: gRPC interceptor / REST middleware / FastAPI Depends / RBAC 테스트 에서 호출 (fan_in >= 4)
-// @MX:TODO Sprint 5 — scope union 로직 및 regex `^iroum-ax:(admin|analyst|viewer)$` 파싱 구현
-func Authorize(_ context.Context, requiredPerm string) error {
-	// Sprint 5에서 permissionMatrix를 사용하는 실제 로직으로 교체
-	_ = permissionMatrix
-	_ = requiredPerm
-	return errors.New("구현 예정: Sprint 5 GREEN")
 }
 
 // ParseRolesFromScope — scope 문자열에서 iroum-ax:* 패턴의 역할을 추출한다.
 // 공백으로 구분된 scope 토큰 중 "iroum-ax:(admin|analyst|viewer)" 형식만 인식한다.
 // 미인식 토큰은 silently drop된다 (AC-AUTH-004-5).
 //
-// @MX:TODO Sprint 5 GREEN — regex `^iroum-ax:(admin|analyst|viewer)$` 파싱 구현
-func ParseRolesFromScope(_ string) []Role {
-	// Sprint 5에서 실제 파싱 로직으로 교체
-	return nil
+// @MX:ANCHOR: [AUTO] scope → Role 변환 단일 진입점
+// @MX:REASON: Authorize / LogForbidden / 미들웨어 검증 등 fan_in >= 3
+func ParseRolesFromScope(scope string) []Role {
+	if scope == "" {
+		return nil
+	}
+	roles := make([]Role, 0)
+	for _, token := range strings.Fields(scope) {
+		m := roleRegex.FindStringSubmatch(token)
+		if m == nil {
+			continue
+		}
+		roles = append(roles, Role(m[1]))
+	}
+	return roles
 }
 
 // EffectivePermissions — 역할 목록의 permission union 집합을 반환한다.
 // 여러 역할이 주어지면 각 역할의 권한을 합집합으로 계산한다 (AC-AUTH-004-4).
+func EffectivePermissions(roles []Role) map[Permission]bool {
+	perms := make(map[Permission]bool)
+	for _, r := range roles {
+		for _, p := range permissionMatrix[r] {
+			perms[p] = true
+		}
+	}
+	return perms
+}
+
+// Authorize — context에서 사용자 정보를 읽어 requiredPerm을 보유하는지 확인한다.
+// 인증은 통과했으나 권한이 부족하면 ErrInsufficientPermission을 반환한다.
 //
-// @MX:TODO Sprint 5 GREEN — permissionMatrix를 사용한 union 로직 구현
-func EffectivePermissions(_ []Role) map[Permission]bool {
-	// Sprint 5에서 실제 union 로직으로 교체
+// @MX:ANCHOR: [AUTO] RBAC 결정 단일 진입점
+// @MX:REASON: gRPC interceptor / REST middleware / 테스트 에서 호출 (fan_in >= 4)
+func Authorize(ctx context.Context, requiredPerm Permission) error {
+	user, ok := UserFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("context에 사용자 정보 없음: %w", ErrInsufficientPermission)
+	}
+	roles := ParseRolesFromScope(strings.Join(user.Scopes, " "))
+	perms := EffectivePermissions(roles)
+	if !perms[requiredPerm] {
+		return fmt.Errorf("required=%s granted_roles=%v: %w", requiredPerm, roles, ErrInsufficientPermission)
+	}
 	return nil
 }
 
 // LogForbidden — RBAC 접근 거부 이벤트를 audit_logs에 기록한다.
 // action=AUTH_FORBIDDEN, method, path, user_id, granted_roles를 details JSON에 포함한다.
+// 호출자가 제공한 tx 위에서 실행되므로 commit/rollback은 호출자 책임이다.
 //
-// @MX:TODO Sprint 5 GREEN — audit.ActionAuthForbidden 이벤트 삽입 구현
-func LogForbidden(_ context.Context, _ audit.AuditTx, _ string, _ string, _ string, _ []Role) error {
-	// Sprint 5에서 실제 audit 기록 로직으로 교체
-	return errors.New("구현 예정: Sprint 5 GREEN")
+// @MX:NOTE: [AUTO] tx를 직접 받으므로 Recorder 없이 AuditTx 인터페이스를 직접 사용
+func LogForbidden(ctx context.Context, tx audit.AuditTx, method, path, userID string, grantedRoles []Role) error {
+	// granted_roles 문자열 슬라이스로 변환
+	rolesStr := make([]string, len(grantedRoles))
+	for i, r := range grantedRoles {
+		rolesStr[i] = string(r)
+	}
+
+	// details JSON 직렬화: method, path, granted_roles 포함
+	details, err := json.Marshal(map[string]any{
+		"method":        method,
+		"path":          path,
+		"granted_roles": rolesStr,
+	})
+	if err != nil {
+		return fmt.Errorf("LogForbidden details JSON 직렬화 실패: %w", err)
+	}
+
+	e := &audit.Event{
+		Timestamp:   time.Now(),
+		Action:      audit.ActionAuthForbidden,
+		UserID:      userID,
+		DetailsJSON: details,
+	}
+	if err := tx.InsertAuditLog(ctx, e); err != nil {
+		return fmt.Errorf("LogForbidden audit 이벤트 삽입 실패: %w", err)
+	}
+	return nil
 }
