@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ircp/iroum-ax/apps/control-plane/internal/audit"
+	"github.com/ircp/iroum-ax/apps/control-plane/internal/auth"
 	stderrors "github.com/ircp/iroum-ax/apps/control-plane/internal/errors"
 	proto "github.com/ircp/iroum-ax/apps/control-plane/internal/proto"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/store"
@@ -89,9 +91,16 @@ func (s *WorkflowService) CreateWorkflow(
 		UpdatedAt:  now,
 	}
 
+	// 인증 컨텍스트에서 userID 추출
+	// AuthEnabled=true: JWT sub 클레임 사용, AuthEnabled=false: Recorder가 cli-anonymous로 변환
+	userID := audit.DefaultUserID
+	if u, ok := auth.UserFromContext(ctx); ok && u.UID != "" {
+		userID = u.UID
+	}
+
 	// TxCoordinator: BeginTx → InsertWorkflow + InsertAuditLog → Commit/Rollback
 	// sm.Coordinator()를 통해 상태 머신이 보유한 TxCoordinator 재사용
-	if err = s.sm.Coordinator().ExecuteWorkflowCreate(ctx, wf, req.DocumentID, "cli-anonymous"); err != nil {
+	if err = s.sm.Coordinator().ExecuteWorkflowCreate(ctx, wf, req.DocumentID, userID); err != nil {
 		// 컨텍스트 취소 여부를 추가로 확인
 		if ctx.Err() == context.Canceled {
 			return nil, status.Errorf(codes.Canceled, "워크플로우 생성 중 컨텍스트 취소됨")

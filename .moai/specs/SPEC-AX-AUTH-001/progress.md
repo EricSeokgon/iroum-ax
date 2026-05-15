@@ -60,6 +60,48 @@
 ---
 
 
+---
+
+## Sprint 7 — E2E Integration Tests (AC-AUTH-E2E-1/2)
+
+### GREEN phase (2026-05-15)
+
+**파일 생성/수정:**
+- `apps/control-plane/internal/server/auth_e2e_test.go` — E2E 테스트 파일 (`//go:build integration`)
+- `apps/control-plane/internal/server/grpc_server.go` — `CreateWorkflow` 버그 수정: `"cli-anonymous"` 하드코딩 → `auth.UserFromContext(ctx)` 추출
+- `.moai/sprints/SPEC-AX-AUTH-001/sprint-E2E.md` — Sprint Contract
+
+**의존성 추가:** 없음 (기존 auth/audit/jwt 패키지 사용)
+
+**AC 완료 수:** 4 / 5 (SKIP 1 — Option B RBAC 이관)
+
+**테스트 상태 (Sprint 7 신규 — 5개):**
+- PASS: 4개
+  - TestE2E_Auth_FullChainWithValidToken (AC-AUTH-E2E-1): JWT sub → audit_logs.user_id 검증
+  - TestE2E_Auth_AnonymousFallback (AC-AUTH-E2E-2): AuthEnabled=false → cli-anonymous 검증
+  - TestE2E_Auth_InvalidToken_401 (AC-AUTH-E2E-4): 잘못된 서명 → HTTP 401 검증
+  - TestE2E_Auth_ConcurrentRequests: 5개 goroutine user_id 격리 검증
+- SKIP: 1개
+  - TestE2E_Auth_RBACForbidden (AC-AUTH-E2E-3): SPEC-AX-AUTH-002로 이관
+
+**핵심 버그 수정:**
+- `grpc_server.go` `CreateWorkflow`: `"cli-anonymous"` 하드코딩 → `audit.DefaultUserID + auth.UserFromContext(ctx)` 패턴으로 수정
+- 동작: AuthEnabled=true → JWT sub 전달; AuthEnabled=false → Recorder.resolveUserID가 cli-anonymous 강제
+
+**Sprint 1-6 회귀:**
+- audit/auth/scheduler/server/store/workflow 패키지 전체 PASS (단위 테스트)
+
+**에러 델타:** 0 (신규 PASS 4 + SKIP 1)
+
+**인증 체인 검증 경로:**
+```
+HTTP Request → RESTMiddleware(TokenValidator) → auth.UserFromContext
+→ WorkflowService.CreateWorkflow → TxCoordinator.ExecuteWorkflowCreate
+→ audit.Recorder.resolveUserID → audit_logs.user_id
+```
+
+---
+
 > Format: Sprint → Phase → 날짜 → AC 완료 수 / 전체 → 에러 델타
 > Re-planning Gate: AC 완료율 0% + 3연속 → 트리거
 
