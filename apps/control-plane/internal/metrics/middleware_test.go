@@ -151,6 +151,93 @@ func TestMetricsHandler_Returns200(t *testing.T) {
 		"Content-Type이 text/plain이어야 한다")
 }
 
+// ── AC-OBS-003-3 probe 경로 제외 테스트 (RED → GREEN) ────────────────────────
+
+// TestHTTPInstrumentationMiddleware_ProbePathsSkipped — REQ-OBS-003-S1
+// /health, /ready, /metrics 요청은 iroum_ax_http_request_duration_seconds에 기록되지 않아야 한다.
+// 요청은 정상 통과하되 latency observe만 skip (self-scrape SLA 오염 방지).
+func TestHTTPInstrumentationMiddleware_ProbePathsSkipped(t *testing.T) {
+	t.Parallel()
+
+	probePaths := []string{"/health", "/ready", "/metrics"}
+
+	for _, path := range probePaths {
+		path := path
+		t.Run("probe_skip:"+path, func(t *testing.T) {
+			t.Parallel()
+
+			reg := prometheus.NewRegistry()
+			m := newMetricsWithRegistry(reg)
+
+			// probe 경로 핸들러 — 200 OK 반환
+			probe := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+
+			mw := HTTPInstrumentationMiddleware(m)
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			w := httptest.NewRecorder()
+			mw(probe).ServeHTTP(w, req)
+
+			// 요청은 정상 통과
+			assert.Equal(t, http.StatusOK, w.Code, path+"는 200으로 정상 통과해야 한다")
+
+			// REQ-OBS-003-S1: probe 경로 샘플 부재 assert
+			mfs, err := reg.Gather()
+			require.NoError(t, err)
+
+			for _, mf := range mfs {
+				if mf.GetName() == "iroum_ax_http_request_duration_seconds" {
+					for _, metric := range mf.GetMetric() {
+						for _, lp := range metric.GetLabel() {
+							if lp.GetName() == "path" && lp.GetValue() == path {
+								t.Errorf("probe 경로 %q가 iroum_ax_http_request_duration_seconds에 기록됨 — REQ-OBS-003-S1 위반", path)
+							}
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestHTTPInstrumentationMiddleware_NonProbePathRecorded — REQ-OBS-003-E1
+// 일반 경로(/api/v1/...)는 iroum_ax_http_request_duration_seconds에 정상 기록되어야 한다.
+func TestHTTPInstrumentationMiddleware_NonProbePathRecorded(t *testing.T) {
+	t.Parallel()
+
+	reg := prometheus.NewRegistry()
+	m := newMetricsWithRegistry(reg)
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	mw := HTTPInstrumentationMiddleware(m)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workflows", nil)
+	w := httptest.NewRecorder()
+	mw(handler).ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	mfs, err := reg.Gather()
+	require.NoError(t, err)
+
+	var found bool
+	for _, mf := range mfs {
+		if mf.GetName() == "iroum_ax_http_request_duration_seconds" {
+			for _, metric := range mf.GetMetric() {
+				if metric.GetHistogram().GetSampleCount() >= 1 {
+					found = true
+				}
+			}
+		}
+	}
+	assert.True(t, found, "일반 경로는 iroum_ax_http_request_duration_seconds에 기록되어야 한다 (REQ-OBS-003-E1)")
+}
+
+// ── 기존 테스트 ────────────────────────────────────────────────────────────────
+
 // TestInstrumentationMiddleware_RecordsHistogram — HTTP instrumentation middleware가 히스토그램에 기록해야 한다.
 func TestInstrumentationMiddleware_RecordsHistogram(t *testing.T) {
 	t.Parallel()
@@ -178,8 +265,9 @@ func TestInstrumentationMiddleware_RecordsHistogram(t *testing.T) {
 	assert.True(t, found, "instrumentation middleware가 히스토그램에 관측값을 기록해야 한다")
 }
 
-// TestMetricsAuthMiddleware_NoToken_NestedErrorBody — 401 응답 body가 nested JSON 형식이어야 한다.
-// AC-OBS-002-3: {"error":{"code":"UNAUTHENTICATED","message":"..."}} (DISPUTE #4 fix)
+// TestMetricsAuthMiddleware_NoToken_NestedErrorBody — AC-OBS-002-3 정확 body 검증
+// acceptance.md L87: {"error":{"code":"UNAUTHENTICATED","message":"authentication required for metrics"}}
+// 토큰 없음/비-Bearer/검증실패 등 모든 401 케이스 동일 단일 고정값 (spec SSOT)
 func TestMetricsAuthMiddleware_NoToken_NestedErrorBody(t *testing.T) {
 	t.Parallel()
 
@@ -194,12 +282,58 @@ func TestMetricsAuthMiddleware_NoToken_NestedErrorBody(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 	body := w.Body.String()
-	assert.Contains(t, body, `"UNAUTHENTICATED"`, "에러 code가 UNAUTHENTICATED여야 한다")
+	// acceptance.md L87 정확 리터럴 검증
+	assert.Contains(t, body, `"UNAUTHENTICATED"`, "AC-OBS-002-3: code=UNAUTHENTICATED")
+	assert.Contains(t, body, `"authentication required for metrics"`,
+		"AC-OBS-002-3: message 단일 고정값 'authentication required for metrics'")
 	assert.Contains(t, body, `"error"`, "nested error key가 있어야 한다")
 }
 
-// TestMetricsAuthMiddleware_Forbidden_NestedErrorBody — 403 응답 body가 nested JSON 형식이어야 한다.
-// AC-OBS-002-4: {"error":{"code":"FORBIDDEN","message":"..."}} (DISPUTE #4 fix)
+// TestMetricsAuthMiddleware_NonBearer_Returns401_FixedMessage — AC-OBS-002-3 (ii) sub-case
+// Bearer scheme 아닌 토큰도 동일 고정 메시지 401이어야 한다.
+func TestMetricsAuthMiddleware_NonBearer_Returns401_FixedMessage(t *testing.T) {
+	t.Parallel()
+
+	reg := prometheus.NewRegistry()
+	m := newMetricsWithRegistry(reg)
+	v := testValidator(t)
+
+	mw := metricsAuthMiddlewareWithMetrics(v, true, m)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Authorization", "Token xyz") // Bearer scheme 아님
+	w := httptest.NewRecorder()
+	mw(dummyHandler).ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, `"authentication required for metrics"`,
+		"AC-OBS-002-3 (ii): 비-Bearer도 단일 고정 메시지")
+}
+
+// TestMetricsAuthMiddleware_InvalidToken_Returns401_FixedMessage — AC-OBS-002-3 (iii) sub-case
+// 검증 실패 토큰도 동일 고정 메시지 401이어야 한다.
+func TestMetricsAuthMiddleware_InvalidToken_Returns401_FixedMessage(t *testing.T) {
+	t.Parallel()
+
+	reg := prometheus.NewRegistry()
+	m := newMetricsWithRegistry(reg)
+	v := testValidator(t)
+
+	mw := metricsAuthMiddlewareWithMetrics(v, true, m)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Authorization", "Bearer bad.invalid.token")
+	w := httptest.NewRecorder()
+	mw(dummyHandler).ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, `"authentication required for metrics"`,
+		"AC-OBS-002-3 (iii): 검증 실패도 단일 고정 메시지")
+}
+
+// TestMetricsAuthMiddleware_Forbidden_NestedErrorBody — AC-OBS-002-4 정확 body 검증 (false-green 교정)
+// acceptance.md L93: {"error":{"code":"PERMISSION_DENIED","message":"insufficient scope","details":{"required":"read:metrics"}}}
+// 구 false-green: code="FORBIDDEN" assert → spec oracle: code="PERMISSION_DENIED" + details 검증
 func TestMetricsAuthMiddleware_Forbidden_NestedErrorBody(t *testing.T) {
 	t.Parallel()
 
@@ -216,7 +350,15 @@ func TestMetricsAuthMiddleware_Forbidden_NestedErrorBody(t *testing.T) {
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	body := w.Body.String()
-	assert.Contains(t, body, `"FORBIDDEN"`, "에러 code가 FORBIDDEN이어야 한다")
+	// acceptance.md L93 정확 리터럴 검증 (구: "FORBIDDEN" → 신: "PERMISSION_DENIED")
+	assert.Contains(t, body, `"PERMISSION_DENIED"`,
+		"AC-OBS-002-4: code=PERMISSION_DENIED (acceptance.md L93 oracle)")
+	assert.Contains(t, body, `"insufficient scope"`,
+		"AC-OBS-002-4: message='insufficient scope'")
+	assert.Contains(t, body, `"required"`,
+		"AC-OBS-002-4: details.required 필드 존재")
+	assert.Contains(t, body, `"read:metrics"`,
+		"AC-OBS-002-4: details.required='read:metrics'")
 	assert.Contains(t, body, `"error"`, "nested error key가 있어야 한다")
 }
 

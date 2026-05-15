@@ -240,8 +240,8 @@ func (s *Server) Run(ctx context.Context) error {
 		s.cfg.AuthEnabled,
 	))
 
-	// HTTP instrumentation: outerMux 전체를 최외곽에서 감싸 모든 요청(probe 포함) 계측 (REQ-OBS-001, AC-OBS-001-2)
-	// @MX:NOTE: [AUTO] HTTPInstrumentationMiddleware는 outerMux 최외곽 래핑 — /health, /ready, /metrics 포함 전체 경로 계측
+	// HTTP instrumentation: outerMux 전체를 최외곽에서 감싸 계측 (REQ-OBS-003-E1)
+	// @MX:NOTE: [AUTO] probe/metrics 경로는 self-scrape 노이즈 방지 위해 계측 제외 — REQ-OBS-003-S1
 	instrumentedHandler := metrics.HTTPInstrumentationMiddleware(metrics.GlobalMetrics())(outerMux)
 
 	// HTTP 서버 생성 (G112 Slowloris 방어: ReadHeaderTimeout 명시)
