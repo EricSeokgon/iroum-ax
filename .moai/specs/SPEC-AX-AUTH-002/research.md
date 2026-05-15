@@ -330,12 +330,12 @@ audit_logs schema 변경 없음. `cli-anonymous` 폴백 보존(REQ-AUTH2-UBI-001
 
 > [HARD] manager-spec(본 agent)은 AskUserQuestion 호출 금지. 본 SPEC은 autonomous mode이므로 sensible default로 진행.
 
-### Q1: `/metrics` endpoint 인증 정책
+### Q1: `/metrics` endpoint 인증 정책 — **DEFERRED to SPEC-AX-OBS-001** (v0.1.2 Option C)
 
 - 질문: Prometheus scrape endpoint `/metrics`를 완전 bypass할 것인가, admin-only로 제한할 것인가?
-- 옵션 A (권장 default): bypass — Prometheus는 K8s 내부망에서 scrape하며 별도 network policy로 차단됨
-- 옵션 B: admin only — service account token으로 인증
-- 결정: **옵션 A** (REQ-AUTH2-001-E1 매트릭스에 명시) — KEPCO 망분리 환경에서 internal network ACL이 일차 방어선
+- ~~옵션 A: bypass — Prometheus는 K8s 내부망에서 scrape하며 별도 network policy로 차단됨~~
+- ~~옵션 B: admin only — service account token으로 인증~~ (iter 2 D4에서 일시 적용했으나 iter 3에서 분리)
+- **v0.1.2 (iter 3) 결정**: **DEFERRED** — 본 SPEC 범위에서 `/metrics` 완전 제거. 사유: AUTH-001 `rbac.go` permissionMatrix에 `read:metrics`가 미정의이며 `rest_handler.go`에도 `/metrics` 핸들러가 미등록 상태로(evaluator-active iter 3 검증 결과), 본 SPEC scope에서 `/metrics` 권한 매핑만 추가하면 cross-SPEC 변경(rbac.go + rest_handler.go 동시) 필요 → 명세-코드 모순. 후속 SPEC **`SPEC-AX-OBS-001`** (Observability + Monitoring) 또는 **`SPEC-AX-METRICS-001`**(Prometheus exposition 전용)에서 (a) rbac.go permissionMatrix에 `read:metrics` 추가, (b) rest_handler.go에 `/metrics` handler 등록(promhttp.Handler), (c) authz mapping에 `/metrics → read:metrics` 추가를 한 SPEC scope으로 처리. 임시 운영 보호: K8s NetworkPolicy / Docker network isolation / Helm values 차원 (KEPCO 망분리 환경에서 internal network ACL이 일차 방어선).
 
 ### Q2: DELETE 핸들러 구현 시점
 

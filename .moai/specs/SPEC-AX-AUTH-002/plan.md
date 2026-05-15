@@ -36,12 +36,12 @@ S2 (gRPC UnaryAuthzInterceptor) ─┘
   - `type permissionMap struct { method, path string }` (REST 키)
   - `restPermissionTable map[permissionMap]string` (canonical REST 매핑, REQ-AUTH2-001-E1 매트릭스 그대로)
   - `grpcPermissionTable map[string]string` (gRPC FullMethod → Permission)
-  - `bypassPaths map[permissionMap]bool` (`/health`, `/metrics`, HEAD/OPTIONS)
+  - `bypassPaths map[permissionMap]bool` (`/health`, HEAD/OPTIONS) — `/metrics`는 v0.1.2 Option C로 본 SPEC 범위 외 (spec.md §5 Exclusion #13), 후속 SPEC `SPEC-AX-OBS-001` 또는 `SPEC-AX-METRICS-001`이 mapping과 handler 모두 처리
   - `bypassGRPCMethods map[string]bool` (`/grpc.health.v1.Health/Check`)
   - `func resolveRESTPermission(method, path string) (perm string, bypass bool, mapped bool)` — `mapped=false` 시 default-deny 트리거
   - `func resolveGRPCPermission(fullMethod string) (perm string, bypass bool, mapped bool)`
   - `// @MX:ANCHOR: [AUTO] REST/gRPC 권한 매핑 단일 진입점 (fan_in >= 4)`
-  - `// @MX:REASON: REQ-AUTH2-001-U1 default-deny 보안 결정의 immutable source-of-truth`
+  - `// @MX:REASON: REQ-AUTH2-001-U1 (Unwanted default-deny) + REQ-AUTH2-001-S1 (Ubiquitous code-as-config) 보안 결정의 immutable source-of-truth`
 - `apps/control-plane/internal/server/authz_test.go` 신규 — 테이블 드리븐 단위 테스트:
   - REST 매핑 positive (8개 경로 × allowed roles)
   - REST 매핑 negative (unknown path → default-deny)
@@ -49,6 +49,8 @@ S2 (gRPC UnaryAuthzInterceptor) ─┘
   - gRPC 매핑 positive (3 RPCs)
   - gRPC 매핑 negative (unknown method → default-deny)
   - lookup performance benchmark `BenchmarkAuthzMapping` (target p99 < 100µs, 측정만; CI gate는 NFR 1.5× 완화)
+  - `TestBuildRESTChain_Order` 신설 (D7 iter-2 fix): 체인 조합 헬퍼가 `auth.RESTMiddleware → RESTAuthzMiddleware → handler` 순서로 호출함을 record middleware 패턴으로 검증
+  - `TestBuildGRPCInterceptorChain_Order` 신설 (D7 iter-2 fix): 체인 조합 헬퍼가 `auth.UnaryServerInterceptor → UnaryAuthzInterceptor → handler` 순서로 호출함을 검증
 
 ### Exit
 - `go test ./apps/control-plane/internal/server/... -run TestAuthzMapping -v` 모두 PASS
@@ -78,8 +80,11 @@ S2 (gRPC UnaryAuthzInterceptor) ─┘
   - `// @MX:NOTE: [AUTO] 인증 통과 직후 권한 결정의 단일 결정점 (REQ-AUTH2-UBI-001-c 사전 차단)`
   - default-deny 분기에 `// @MX:WARN: [AUTO] 매핑 미정의 시 503으로 fail-closed`
   - `// @MX:REASON: 보안 결정 누락 방지; 매핑 hot-patch 금지`
-- `rest_handler.go` `Mux()` 수정 — 본 SPEC은 wiring만, 단 `Mux()` 자체는 인증/인가 미들웨어 외부에서 chain되므로 본 파일 변경은 최소. `cmd/server/server.go`에서 `auth.RESTMiddleware(validator)(server.RESTAuthzMiddleware(recorder)(handler.Mux()))` 순서로 chain.
-- `cmd/server/server.go` 수정 — REST chain 등록 한 줄 + audit recorder 주입.
+- `apps/control-plane/internal/server/chain.go` 신규 (D2/D7 iter-2 fix) — 미들웨어 체인 조합 헬퍼:
+  - `func BuildRESTChain(handler http.Handler, validator auth.Validator, recorder audit.Recorder, authEnabled bool) http.Handler` — 내부적으로 `auth.RESTMiddleware(validator)(server.RESTAuthzMiddleware(recorder, authEnabled)(handler))` 순서를 코드로 강제. `authEnabled=false`이면 미들웨어를 chain에서 제외하여 백워드 호환.
+  - `// @MX:ANCHOR: [AUTO] REST 체인 조합 단일 진입점 (fan_in >= 2: 테스트 + SPEC-AX-SERVER-001)`
+  - `// @MX:REASON: D7 미들웨어 순서 강제 — 호출자가 순서를 뒤집을 수 없게 캡슐화`
+- `cmd/server/server.go` **본 SPEC 범위 외** (D2 iter-2 fix) — 본 파일은 40-line stub이며 실제 grpc.NewServer / http.Server / Listen은 후속 SPEC `SPEC-AX-SERVER-001`이 처리. 본 SPEC은 `chain.go` 헬퍼만 제공한다.
 - `rest_handler_test.go` 추가 시나리오:
   - viewer POST `/api/v1/workflows` → 403 + audit_logs 1 row + workflows 변화 없음
   - analyst POST → 201 (정상)
@@ -108,7 +113,10 @@ S2 (gRPC UnaryAuthzInterceptor) ─┘
 - `authz.go`에 다음 추가:
   - `func UnaryAuthzInterceptor(recorder auditRecorder, authEnabled bool) grpc.UnaryServerInterceptor`
     - `info.FullMethod` 추출 → `resolveGRPCPermission` → bypass면 handler 호출 → mapped=false면 `codes.Unavailable` 반환 + audit → `auth.UserFromContext` → `auth.Authorize` → 실패 시 `codes.PermissionDenied` + `LogForbidden`
-- `cmd/server/server.go` 수정 — gRPC chain 등록: `grpc.ChainUnaryInterceptor(auth.UnaryServerInterceptor(validator), server.UnaryAuthzInterceptor(recorder, cfg.AuthEnabled))`
+- `chain.go`에 다음 추가 (D2/D7 iter-2 fix):
+  - `func BuildGRPCInterceptorChain(validator auth.Validator, recorder audit.Recorder, authEnabled bool) grpc.ServerOption` — 내부적으로 `grpc.ChainUnaryInterceptor(auth.UnaryServerInterceptor(validator), server.UnaryAuthzInterceptor(recorder, authEnabled))` 순서로 ServerOption 반환. `authEnabled=false`이면 두 인터셉터 모두 제외.
+  - `// @MX:NOTE: [AUTO] gRPC 체인 조합 단일 진입점, chain order는 단위 테스트 TestBuildGRPCInterceptorChain_Order로 회귀 가드`
+- `cmd/server/server.go` **본 SPEC 범위 외** (D2 iter-2 fix). 후속 SPEC `SPEC-AX-SERVER-001` 책임.
 - `grpc_server_test.go` 추가 시나리오:
   - viewer `CreateWorkflow` → `codes.PermissionDenied` + audit row + DB 변화 없음
   - analyst `CreateWorkflow` → OK (정상)
@@ -141,10 +149,11 @@ S2 (gRPC UnaryAuthzInterceptor) ─┘
     - analyst 토큰 + `GET /api/v1/workflows` → HTTP 200 + workflows list 반환
     - admin 토큰 + `DELETE /api/v1/workflows/{id}` → RBAC 단 통과(403 아님). DELETE 핸들러는 본 SPEC 범위 외이므로 501/404 허용. 핵심 assertion: response가 403이 아니라는 것 + audit `AUTH_FORBIDDEN` 미생성.
   - TODO 주석 제거 + `SPEC-AX-AUTH-002 RBAC wired` 마커 추가
+  - **AC-AUTH2-004-Sprint7-Unblock 신설 (D5 iter-2 fix)**: S3 종료 시 `grep -c "SPEC-AX-AUTH-002: RBAC REST handler wiring deferred" apps/control-plane/internal/server/auth_e2e_test.go` 결과가 정확히 `0`임을 단언. 또한 `grep -c "t.Skip" apps/control-plane/internal/server/auth_e2e_test.go` 결과에서 `TestE2E_Auth_RBACForbidden` 함수 내 `t.Skip` 호출이 0건임을 확인하는 mechanical assertion (DoD 검증).
 - `schemas/openapi/openapi.yaml` 수정 — `403 Forbidden` 응답 스키마 + `WWW-Authenticate: Bearer ... error="insufficient_scope"` 헤더 명세 추가 (cross-SPEC documentation artifact).
 - Plan.md 결과 섹션에 cross-SPEC artifact 변경 명시 (lessons #5 적용):
-  - AUTH-001 `auth_e2e_test.go:354~371` SKIP 제거 (line numbers shift 가능, marker는 test name `TestE2E_Auth_RBACForbidden`)
-  - AUTH-001 acceptance.md §6 AC-AUTH-E2E-3 status: `SKIP → ACTIVE (by SPEC-AX-AUTH-002 S3)`
+  - AUTH-001 `auth_e2e_test.go:354~371` SKIP 제거 (line numbers shift 가능, marker는 test name `TestE2E_Auth_RBACForbidden`) — 본 SPEC S3 deliverable에서 처리
+  - AUTH-001 `acceptance.md` §6 AC-AUTH-E2E-3 status: `SKIP → ACTIVE (by SPEC-AX-AUTH-002 S3)` 마커 추가 — **AUTH-001 SPEC 파일 자체 수정은 본 SPEC 범위 외 별도 chore commit으로 처리** (v0.1.2 evaluator DISPUTE 후 cross-ref Minor). 본 SPEC S3 deliverable에는 AUTH-001 `auth_e2e_test.go`(production source artifact)의 SKIP 함수 unblock만 포함되며, AUTH-001 `acceptance.md` (SPEC frozen 산출물) 수정은 후속 chore commit `chore(SPEC-AX-AUTH-001): mark AC-AUTH-E2E-3 ACTIVE post SPEC-AX-AUTH-002`로 분리한다.
 
 ### Exit
 - `TestE2E_Auth_RBACForbidden` GREEN (3 시나리오 모두 PASS)
@@ -182,10 +191,11 @@ S2 (gRPC UnaryAuthzInterceptor) ─┘
 
 | SPEC | Artifact | 변경 내용 | 변경 책임 |
 |------|----------|----------|----------|
-| SPEC-AX-AUTH-001 | `apps/control-plane/internal/server/auth_e2e_test.go` `TestE2E_Auth_RBACForbidden` | `t.Skip(...)` 제거 + 3 시나리오 활성화 | 본 SPEC S3 |
-| SPEC-AX-AUTH-001 | `acceptance.md` §6 AC-AUTH-E2E-3 status | `SKIP → ACTIVE (by SPEC-AX-AUTH-002 S3)` 마커 추가 | 본 SPEC S3 (acceptance.md edit) |
+| SPEC-AX-AUTH-001 | `apps/control-plane/internal/server/auth_e2e_test.go` `TestE2E_Auth_RBACForbidden` | `t.Skip(...)` 제거 + 2 시나리오(viewer DELETE + viewer GET) 활성화 | 본 SPEC S3 deliverable |
+| SPEC-AX-AUTH-001 | `acceptance.md` §6 AC-AUTH-E2E-3 status | `SKIP → ACTIVE (by SPEC-AX-AUTH-002 S3)` 마커 추가 | **본 SPEC 범위 외 — 별도 chore commit** (v0.1.2 cross-ref Minor): AUTH-001 SPEC frozen 산출물 수정은 `chore(SPEC-AX-AUTH-001): mark AC-AUTH-E2E-3 ACTIVE post SPEC-AX-AUTH-002`로 분리 |
 | SPEC-AX-CTRL-001 | (없음) | 본 SPEC은 핸들러 비즈니스 로직 변경 없음. CTRL-001 모든 AC 영향 없음 | - |
 | SPEC-AX-001 | (없음) | audit_logs schema 변경 없음. `cli-anonymous` 폴백 보존 | - |
+| SPEC-AX-OBS-001 / SPEC-AX-METRICS-001 (예정) | `/metrics` permission matrix entry + handler | v0.1.2 Option C로 본 SPEC 범위에서 분리됨. `rbac.go` permissionMatrix에 `read:metrics` 추가 + `rest_handler.go`에 `/metrics` handler 등록 | 후속 SPEC (별도 plan/run 사이클) |
 
 본 SPEC 진행 중 SPEC-AX-AUTH-001 전체 test suite 통과 유지가 CI 의무. 회귀 발생 시 본 SPEC 차단.
 

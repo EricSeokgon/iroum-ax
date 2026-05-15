@@ -90,13 +90,12 @@ REQ 대응: REQ-AUTH2-001-E1.
 - `POST /api/v1/workflows` → write:workflow
 - `GET /api/v1/workflows/{id}` → read:workflow
 - `GET /api/v1/workflows` → read:workflow
-- `DELETE /api/v1/workflows/{id}` → delete:workflow
+- `DELETE /api/v1/workflows/{id}` → delete:workflow (RBAC 통과만 검증; 핸들러는 후속 SPEC `SPEC-AX-WF-DELETE-001` — D3 iter-2 fix)
 - `POST /api/v1/recommendations/{id}/feedback` → write:recommendation
 - `POST /api/v1/documents/upload` → write:workflow
 - `GET /health` → bypass
-- `GET /metrics` → bypass
 
-**Then**: 모두 RBAC 단 통과(403 아님). 핸들러 응답 코드는 비즈니스 로직에 따름 (DELETE는 핸들러 부재로 501/404 가능, 단 403은 아님).
+**Then**: 모두 RBAC 단 통과(403 아님). 핸들러 응답 코드는 비즈니스 로직에 따름 (DELETE는 핸들러 부재로 501/404 가능, 단 403은 아님). admin DELETE 통과 검증의 상세 동작(workflow 삭제 + WORKFLOW_DELETED audit)은 본 SPEC 범위 외 — 후속 SPEC `SPEC-AX-WF-DELETE-001`. `/metrics`는 본 SPEC 범위 외(v0.1.2 Option C 분리, spec.md §5 Exclusion #13) — 후속 SPEC `SPEC-AX-OBS-001`/`SPEC-AX-METRICS-001`.
 
 ### AC-AUTH2-001-2 (REST mapping — Unknown path default-deny)
 
@@ -324,27 +323,35 @@ REQ 대응: REQ-AUTH2-004-E1 + REQ-AUTH2-004-U1.
 - `workflows` 테이블에서 `wf-fixture-004-1` 여전히 존재 (삭제 안 됨)
 - 본 시나리오는 AUTH-001 acceptance.md §6 AC-AUTH-E2E-3의 SKIP을 unblock
 
-### AC-AUTH2-004-2 (analyst GET → 200)
+### AC-AUTH2-004-2 (viewer GET → 200, default-deny 비적용 검증 — D3 iter-2 fix)
 
 REQ 대응: REQ-AUTH2-004-E2.
 
-**Given**: 동일 인프라, analyst 토큰
-**When**: `GET /api/v1/workflows`
+**Given**: 동일 인프라, viewer 토큰(sub=`kepco-viewer-002`); `workflows` 테이블에 fixture row `wf-fixture-004-2` 사전 INSERT
+
+**When**: `GET /api/v1/workflows` with viewer Bearer token
+
 **Then**:
 - HTTP 200 OK
-- 응답 body에 workflows JSON array
-- `audit_logs` `AUTH_FORBIDDEN` row 0건
+- 응답 body에 workflows JSON array (viewer가 read:workflow 권한 보유)
+- `audit_logs` `AUTH_FORBIDDEN` row 0건 (viewer가 read endpoint에서 mapping-missing 503 fallback 없이 정상 통과)
+- 본 AC는 viewer가 자신의 권한 범위 내 endpoint에서 default-deny 503 또는 403이 발생하지 않음을 검증 (positive case로 default-deny가 read 권한을 잘못 차단하지 않음을 보장)
 
-### AC-AUTH2-004-3 (admin DELETE → RBAC 통과, 403 아님)
+### AC-AUTH2-004-Sprint7-Unblock (SKIP 마커 mechanical 제거 — D5 iter-2 fix)
 
-REQ 대응: REQ-AUTH2-004-E3.
+REQ 대응: REQ-AUTH2-004-U1.
 
-**Given**: 동일 인프라, admin 토큰(sub=`kepco-admin-001`), fixture workflow `wf-fixture-004-3`
-**When**: `DELETE /api/v1/workflows/wf-fixture-004-3` with admin Bearer token
+**Given**: S1 + S2 GREEN 종료, S3 진입
+
+**When**: S3 deliverable 완료 후 `auth_e2e_test.go` 정적 점검
+
 **Then**:
-- 응답 코드가 403이 아님 (RBAC 통과 검증; 실제 핸들러 응답은 501/404/200 무관)
-- `audit_logs`에 `AUTH_FORBIDDEN` row 0건 (admin은 권한 보유)
-- DELETE 핸들러 자체 동작은 후속 SPEC 범위이므로 본 AC는 RBAC 단 통과만 검증
+- `grep -c "SPEC-AX-AUTH-002: RBAC REST handler wiring deferred" apps/control-plane/internal/server/auth_e2e_test.go` 결과 = 0
+- `auth_e2e_test.go` 내 `TestE2E_Auth_RBACForbidden` 함수 body에서 `t.Skip(...)` 호출 0건 (정규식 `grep -A 5 "func TestE2E_Auth_RBACForbidden" auth_e2e_test.go | grep -c "t.Skip"` = 0)
+- `TestE2E_Auth_RBACForbidden` 실행 시 GREEN (AC-AUTH2-004-1 + AC-AUTH2-004-2 시나리오 모두 실제 실행)
+- AUTH-001 acceptance.md §6 AC-AUTH-E2E-3 status가 `SKIP → ACTIVE (by SPEC-AX-AUTH-002 S3)` 마커로 업데이트됨
+
+> AC-AUTH2-Metrics-Admin removed in v0.1.2 (Option C — spec.md §5 Exclusion #13). `/metrics` 권한 매핑과 핸들러 등록은 후속 SPEC `SPEC-AX-OBS-001` 또는 `SPEC-AX-METRICS-001`로 분리. 임시 운영 보호는 K8s NetworkPolicy / Docker network isolation / Helm values 차원으로 처리.
 
 ### AC-AUTH2-004-4 (Concurrent RBAC requests — 5 goroutine isolation)
 
@@ -395,9 +402,12 @@ REQ 대응: REQ-AUTH2-002 + REQ-AUTH2-003 동시성 격리.
 | Unknown scope (`iroum-ax:hacker`) → silently dropped | AC-AUTH2-002-6 | AUTH-001 AC-AUTH-004-5 패턴 |
 | User context 미주입 (middleware wiring 버그) | AC-AUTH2-002-4 | defense in depth |
 | 핸들러 진입 후 차단 (사전 차단 invariant 위반) | AC-AUTH2-UBI-001-c | 부작용 차단 |
-| Interceptor 순서 오류 (authz 먼저) | AC-AUTH2-003-6 | chain order 검증 |
+| Interceptor 순서 오류 (authz 먼저) | AC-AUTH2-003-6 + `TestBuildGRPCInterceptorChain_Order` | chain order 검증 (D7 iter-2) |
+| REST 미들웨어 순서 오류 | `TestBuildRESTChain_Order` | chain order 검증 (D7 iter-2) |
 | 동시성 race condition (5 goroutine) | AC-AUTH2-004-4 | `-race` + goleak |
-| DELETE 핸들러 부재로 admin 시나리오 모호 | AC-AUTH2-004-3 | 절대값 회피 (lessons #4) |
+| viewer GET → 200 default-deny 비적용 검증 | AC-AUTH2-004-2 (D3 iter-2) | viewer read 권한 통과 |
+| AUTH-001 SKIP marker mechanical 제거 | AC-AUTH2-004-Sprint7-Unblock (D5 iter-2) | grep 단언 |
+| In-flight 권한 변경 race (Authorize 통과 후 role 변경) | Exclusion §10 #10 (D6 iter-2) | JWT immutable + 만료 1h로 자연 해소 |
 | AUTH-001 백워드 호환 회귀 | AC-AUTH2-UBI-001-b + AC-AUTH2-003-5 | 결정적 검증점 |
 
 ---
@@ -410,18 +420,19 @@ REQ 대응: REQ-AUTH2-002 + REQ-AUTH2-003 동시성 격리.
 - [ ] §1: REQ-AUTH2-001 AC 6개 + performance benchmark 1개
 - [ ] §2: REQ-AUTH2-002 AC 6개
 - [ ] §3: REQ-AUTH2-003 AC 6개
-- [ ] §4: REQ-AUTH2-004 E2E AC 4개 (viewer DELETE + analyst GET + admin DELETE + 동시성)
-- [ ] §5: 6개 성능 지표 모두 target 충족 (CI에서는 1.5× 완화 허용)
-- [ ] §6: 11개 edge case 모두 대응 AC로 검증됨
+- [ ] §4: REQ-AUTH2-004 E2E AC 4개 (viewer DELETE + viewer GET default-deny 비적용 + 동시성 + Sprint7-Unblock SKIP 제거) — v0.1.2에서 AC-AUTH2-Metrics-Admin 삭제(spec.md §5 Exclusion #13, Option C 분리)
+- [ ] §5: 5개 성능 지표 모두 target 충족 (CI에서는 1.5× 완화 허용)
+- [ ] §6: 13개 edge case 모두 대응 AC로 검증됨 (D2/D3/D5/D6/D7 iter-2 fix + v0.1.2 Option C 반영)
 - [ ] coverage ≥ 85% (`go test -cover ./apps/control-plane/internal/server/...`)
 - [ ] golangci-lint default 0 issue
 - [ ] `goleak.VerifyNone(t)` 모든 Go 테스트 통과
 - [ ] `go test -race ./...` 통과
-- [ ] AUTH-001 `auth_e2e_test.go` `TestE2E_Auth_RBACForbidden` SKIP 제거 + GREEN
+- [ ] AUTH-001 `auth_e2e_test.go` `TestE2E_Auth_RBACForbidden` SKIP 제거 + GREEN (AC-AUTH2-004-Sprint7-Unblock grep 단언 PASS)
 - [ ] AUTH-001 acceptance.md §6 AC-AUTH-E2E-3 status `SKIP → ACTIVE (by SPEC-AX-AUTH-002 S3)` 마커 추가
-- [ ] MX tag 등록: `authz.go`에 ANCHOR 1개, NOTE 1개, WARN 1개 + 모두 REASON 보유
+- [ ] MX tag 등록: `authz.go`에 ANCHOR 1개, NOTE 1개, WARN 1개 + `chain.go`에 ANCHOR 1개, NOTE 1개 + 모두 REASON 보유
+- [ ] D7 chain order 단위 테스트 (`TestBuildRESTChain_Order` + `TestBuildGRPCInterceptorChain_Order`) GREEN
 - [ ] manager-quality TRUST 5 통과
 - [ ] evaluator-active per-sprint scoring: S0 ≥ 0.80 (foundation security-critical), S1/S2 ≥ 0.80, S3 ≥ 0.75
 - [ ] AuthEnabled=false 백워드 호환 regression 0건 (SPEC-AX-CTRL-001 + SPEC-AX-AUTH-001 모든 AC unchanged 통과)
 
-**Total AC count**: 23 (§0: 4, §1: 6 + 1 perf, §2: 6, §3: 6, §4: 4) — 단위/통합/E2E 골고루 분포
+**Total AC count**: 22 (§0: 4, §1: 6 + 1 perf, §2: 6, §3: 6, §4: 4 — viewer DELETE / viewer GET (D3 redefined) / 동시성 / Sprint7-Unblock (D5)) — 단위/통합/E2E 골고루 분포. **v0.1.2 (iter 3) 변경**: AC-AUTH2-Metrics-Admin (3 sub-cases) 삭제로 25 → 22. /metrics는 Option C로 후속 SPEC `SPEC-AX-OBS-001`/`SPEC-AX-METRICS-001`에 분리(spec.md §5 Exclusion #13). iter 2 변경: AC-AUTH2-004-3 (admin DELETE) 삭제, AC-AUTH2-004-2 viewer GET로 재정의.
