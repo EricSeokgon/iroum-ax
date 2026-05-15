@@ -1,6 +1,6 @@
 # SPEC-AX-SERVER-001 — Implementation Plan
 
-> SPEC: `SPEC-AX-SERVER-001 v0.1.0`
+> SPEC: `SPEC-AX-SERVER-001 v0.1.2`
 > Methodology: DDD (testcontainers 무거움 + brownfield `server.go` stub 분석 우선 → ANALYZE-PRESERVE-IMPROVE 친화). 단, 신규 파일 3개는 TDD RED-GREEN-REFACTOR로 진행.
 > Harness level: `thorough` (full-stack E2E + 4개 SPEC의 통합 진입점, KEPCO 운영 배포 blocker — Sprint Contract Protocol 필수)
 > Cross-SPEC: AUTH-002 §5 Exclusion #12 정식 해소; CTRL-001 Sprint 7 (`cmd/server/server.go` 실제 부팅) 미완성 gap 흡수
@@ -14,10 +14,13 @@
 DAG 구성:
 
 ```
-S0 (Pre-req chores)
+S0 (Pre-req chores — helper 메서드 2개 + redis 어댑터 promote)
   │  ├── audit/actions.go에 SERVER_STARTUP/SHUTDOWN_INITIATED/SHUTDOWN_COMPLETED 3 const 추가
-  │  ├── config/config.go에 ShutdownTimeoutSeconds + ReadyProbeTimeoutSeconds 2 field 추가 (env: SHUTDOWN_TIMEOUT_SECONDS=30, READY_PROBE_TIMEOUT_SECONDS=5)
-  │  └── go.mod: golang.org/x/sync/errgroup require 추가
+  │  ├── config/config.go에 ShutdownTimeoutSeconds + ReadyProbeTimeoutSeconds 2 field 추가 (env: SHUTDOWN_TIMEOUT_SECONDS=30, READY_PROBE_TIMEOUT_SECONDS=5) + RedisAddr/OIDCIssuerURL/OIDCAudience/CeleryQueue env 존재 확인(누락 시 추가)
+  │  ├── [D1] internal/store/pg_store.go에 Ping(ctx context.Context) error 메서드 추가 (s.pool.Ping(ctx) 래핑)
+  │  ├── [D4/D11] internal/auth/jwks_cache.go에 Reachable(ctx context.Context) bool 메서드 추가 (c.mu.RLock() 보유 하에 lastSuccessAt non-zero + cacheAge < staleMaxAge)
+  │  ├── [D9] internal/scheduler/redis_adapter.go 신규: e2e_test.go:199~209 goRedisAdapter를 production code로 promote (scheduler.NewRedisClientAdapter)
+  │  └── go.mod: golang.org/x/sync/errgroup require 추가 + github.com/redis/go-redis/v9 direct require 승격(누락 시)
   ▼
 S1 (Core bootstrap + dual listener) ←─── 본 SPEC의 60% 작업
   │  ├── cmd/server/server.go 전면 재작성: New() + Run(ctx) + shutdown(ctx)
@@ -44,7 +47,7 @@ S3 (Health/Readiness probes + full-stack E2E + AUTH-002 chain mount 검증)
 
 ## 2. Sprint 상세 (priority 기반, time estimate 미사용)
 
-### S0 — Pre-requisite Chores (Priority: High, 선행 필수)
+### S0 — Pre-requisite Chores (Priority: High, 선행 필수 — helper 메서드 2개 + redis 어댑터 promote)
 
 **Deliverables**:
 
@@ -52,20 +55,45 @@ S3 (Health/Readiness probes + full-stack E2E + AUTH-002 chain mount 검증)
    - `ActionServerStartup = "SERVER_STARTUP"`
    - `ActionServerShutdownInitiated = "SERVER_SHUTDOWN_INITIATED"`
    - `ActionServerShutdownCompleted = "SERVER_SHUTDOWN_COMPLETED"`
-2. `apps/control-plane/internal/config/config.go`에 2 field 추가:
+2. `apps/control-plane/internal/config/config.go`에 2 field 추가 + 기존 env 확인:
    - `ShutdownTimeoutSeconds int` (env: `SHUTDOWN_TIMEOUT_SECONDS`, default 30)
    - `ReadyProbeTimeoutSeconds int` (env: `READY_PROBE_TIMEOUT_SECONDS`, default 5)
-3. `go.mod`: `require golang.org/x/sync v0.11.0` (or 현재 최신 안정). `go mod tidy` 실행.
+   - `RedisAddr` / `OIDCIssuerURL` / `OIDCAudience` / `CeleryQueue` field가 이미 존재하는지 확인; 누락된 항목만 동일 패턴으로 추가 (wiring 단계 (d)/(e)/(f)/(h)에서 사용)
+3. **[D1 해소] `apps/control-plane/internal/store/pg_store.go`에 `Ping` 메서드 추가**:
+   - `func (s *PgWorkflowStore) Ping(ctx context.Context) error` — 내부적으로 `s.pool.Ping(ctx)` 호출 후 실패 시 `fmt.Errorf("postgres ping 실패: %w", err)` 반환, 성공 시 nil.
+   - 기존 메서드(`NewPgWorkflowStore`/`Close`/`BeginTx`/`PoolStats`/`ListWorkflows`/`PgWorkflowTx.*`)는 **미변경**. 메서드 1개 추가만.
+   - 정당성: `NewPgWorkflowStore` 생성자가 내부적으로 `pool.Ping`을 1회 호출하지만 외부에서 런타임 readiness를 재확인할 public 메서드가 없음. REQ-SERVER-002-U1(startup abort) + REQ-SERVER-004-E2(readiness probe)가 동일 메서드를 재사용.
+   - `@MX:NOTE` 추가: readiness probe + startup abort 양쪽에서 호출되는 경량 liveness 메서드.
+4. **[D4/D11 해소] `apps/control-plane/internal/auth/jwks_cache.go`에 `Reachable` 메서드 추가**:
+   - `func (c *JWKSCache) Reachable(ctx context.Context) bool` — **반드시 `c.mu.RLock()`을 획득한 채** `!c.lastSuccessAt.IsZero() && c.cacheAge() < c.staleMaxAge`을 평가하여 true/false 반환 (`defer c.mu.RUnlock()`). (즉 "마지막 JWKS fetch가 한 번이라도 성공했고 stale 유효 기간을 넘기지 않음".) **D11 정정**: `cacheAge()`(jwks_cache.go:212)는 godoc에 "호출자가 `mu.RLock`을 보유해야 한다"는 동시성 계약이 명시되어 있으므로, lock 없이 `lastSuccessAt`/`cacheAge()`를 읽으면 data race가 발생한다. `Reachable`은 반드시 `c.mu.RLock()`/`RUnlock()` 사이에서 평가해야 한다(`-race` 테스트로 검증). 선택적으로 stale 범위면 백그라운드 refresh를 트리거할 수 있으나 본 SPEC은 boolean 판정만 요구(GetKey의 기존 stale-while-revalidate 로직과 중복 구현 금지).
+   - 기존 `GetKey`/`refresh`/`cacheAge`/필드는 **미변경**. 메서드 1개 추가만.
+   - 정당성: `OIDCClient`는 stateless(httpClient + 캐시된 metadata)이므로 readiness 신호를 줄 수 없음. JWKS 신선도는 `JWKSCache`만 알 수 있으므로 readiness용 public getter가 필요. `oidc.go`에는 Close/Reachable 추가하지 않음(불필요).
+   - `@MX:NOTE` 추가: readiness probe(REQ-SERVER-004-E2 (iii)) 전용 신선도 판정 메서드 — `mu.RLock` 보유 필수.
+5. **[D9 해소] `apps/control-plane/internal/scheduler/redis_adapter.go` 신규 파일 (goRedisAdapter promote)**:
+   - 현재 `internal/server/e2e_test.go:199~209`에 test-only로 존재하는 `goRedisAdapter`를 production code로 promote한다. `scheduler` 패키지에 exported 타입으로 정의:
+     - `type RedisClientAdapter struct { client *redis.Client }`
+     - `func NewRedisClientAdapter(client *redis.Client) *RedisClientAdapter`
+     - `func (a *RedisClientAdapter) RPush(ctx context.Context, key string, values ...interface{}) (int64, error) { return a.client.RPush(ctx, key, values...).Result() }`
+     - `func (a *RedisClientAdapter) Ping(ctx context.Context) error { return a.client.Ping(ctx).Err() }`
+   - 정당성: raw `*redis.Client`(go-redis v9)는 `RPush`가 `*redis.IntCmd`, `Ping`이 `*redis.StatusCmd`를 반환하여 `scheduler.RedisClient` 인터페이스(`RPush(ctx,key,...) (int64,error)` + `Ping(ctx) error`, dispatcher.go:24~29)를 직접 충족하지 못함. 어댑터 경유 필수. e2e_test.go의 기존 `goRedisAdapter`는 본 SPEC 범위 외(테스트가 production 어댑터를 재사용하도록 전환할지는 후속 cleanup — 본 SPEC은 production 어댑터 추가만 보장하며 e2e_test.go 자체는 미수정).
+   - wiring 단계 (h)에서 `scheduler.NewRedisClientAdapter(redisClient)`를 호출하여 `scheduler.NewCeleryDispatcher`에 주입. 어댑터 생성은 단순 struct 래핑으로 infallible(captured slice 추적 항목 아님 — 15-element 유지).
+   - `@MX:NOTE` 추가: go-redis v9 command 타입 ↔ `scheduler.RedisClient` 인터페이스 변환 어댑터 (e2e_test.go test-only에서 promote).
+6. `go.mod`: `require golang.org/x/sync v0.11.0` (or 현재 최신 안정). `github.com/redis/go-redis/v9`가 indirect이면 direct require로 승격(이미 `internal/server/e2e_test.go`가 사용 중이므로 go.sum에는 존재 — production `redis_adapter.go`가 direct import하므로 direct require 필수). `go mod tidy` 실행.
 
 **Verification**:
 - `go build ./...` 성공
+- `go test ./internal/store/... ./internal/auth/... ./internal/scheduler/... -race -count=1` 기존 테스트 모두 통과 (메서드/파일 추가는 기존 동작 불변 — regression 없음)
+- 신규 메서드 단위 테스트: `TestPgWorkflowStore_Ping`(정상/연결 단절), `TestJWKSCache_Reachable`(fetch 전 false / fetch 후 true / staleMaxAge 초과 false; `-race`로 `mu.RLock` 동시성 검증), `TestRedisClientAdapter_RPushPing`(어댑터가 `scheduler.RedisClient` 인터페이스 충족 — compile-time assertion `var _ scheduler.RedisClient = (*RedisClientAdapter)(nil)` + miniredis/testcontainers redis 동작 확인)
 - 기존 SPEC AC 모두 그대로 통과 (regression 없음)
 
-**Risk**: 매우 낮음. const 추가 + config field 추가 + 표준 의존성.
+**Risk**: 낮음. const 추가 + config field 추가 + 표준 의존성 + 기존 struct에 read-only helper 메서드 2개 추가 + 신규 어댑터 파일 1개(기존 e2e_test.go test-only 패턴을 production으로 promote, 기존 필드/메서드 시그니처 불변이므로 cross-SPEC 호출자 영향 없음).
 
-**Cross-SPEC impact**: 
+**Cross-SPEC impact**:
 - `audit/actions.go` 추가 const는 AUTH-001 + AUTH-002가 사용 중인 `ActionAuthForbidden` 등과 동일 패턴이므로 충돌 없음.
 - `config.go` field 추가는 CTRL-001 / AUTH-001이 사용 중인 `cfg.AuthEnabled` 등과 동일 패턴.
+- `pg_store.go` `Ping` 추가는 `store.WorkflowStore` 인터페이스를 확장하지 않고 `*PgWorkflowStore` concrete type에만 추가하므로 기존 인터페이스 구현체/호출자 영향 0.
+- `jwks_cache.go` `Reachable` 추가는 `JWKSProvider` 인터페이스(`GetKey`만 요구)와 무관한 추가 메서드이므로 기존 validator 주입 경로 영향 0. `mu.RLock` 보유 계약 준수로 기존 동시성 invariant 보존(D11).
+- `scheduler/redis_adapter.go` 신규 파일은 `scheduler.RedisClient` 인터페이스를 변경하지 않고 어댑터 타입만 추가하므로 기존 `CeleryDispatcher`/test fake 영향 0. e2e_test.go의 기존 test-only `goRedisAdapter`는 미수정(중복 허용 — 후속 cleanup chore에서 production 어댑터로 통합 가능, 본 SPEC 범위 외).
 
 ---
 
@@ -73,20 +101,20 @@ S3 (Health/Readiness probes + full-stack E2E + AUTH-002 chain mount 검증)
 
 **Deliverables**:
 
-1. **`apps/control-plane/cmd/server/server.go` 전면 재작성** (현재 40-line stub → 약 200~250 LOC):
-   - struct `Server { logger, cfg, pgStore, redisClient, oidcClient, tokenValidator, refreshTokenStore, sm, dispatcher, workflowSvc, restHandler, grpcServer, httpServer, shutdownOnce sync.Once, shutdownDone chan struct{} }`
-   - `New(cfg *config.Config, logger *zap.Logger) (*Server, error)`: REQ-SERVER-UBI-001-b 단계 (a)~(j) sequential init. 각 단계 실패 시 `fmt.Errorf("init step %s failed: %w", stepName, err)` + `partialCleanup(initialized)` 역순 호출.
+1. **`apps/control-plane/cmd/server/server.go` 전면 재작성** (현재 40-line stub → 약 220~270 LOC):
+   - struct `Server { logger *zap.Logger; cfg *config.Config; pgStore *store.PgWorkflowStore; redisClient *redis.Client; oidcClient *auth.OIDCClient; jwksCache *auth.JWKSCache; tokenValidator *auth.TokenValidator; refreshStore *auth.RedisRefreshStore; recorder *audit.Recorder; txCoord *workflow.TxCoordinator; sm *workflow.StateMachine; dispatcher *scheduler.CeleryDispatcher; workflowSvc *server.WorkflowService; restHandler *server.RESTHandler; grpcServer *grpc.Server; httpServer *http.Server; shutdownOnce sync.Once; shutdownDone chan struct{} }` (모든 타입은 spec.md §2.0 검증 API 기준; `oidcClient`/`jwksCache`는 AuthEnabled=false 시 nil)
+   - `New(cfg *config.Config, logger *zap.Logger) (*Server, error)`: REQ-SERVER-UBI-001-b 단계 (c)~(j) sequential init (단계 (a)/(b)는 main.go가 선행 호출). 단계 (h)는 `redisAdapter := scheduler.NewRedisClientAdapter(s.redisClient)` 후 `scheduler.NewCeleryDispatcher(redisAdapter, cfg.CeleryQueue, hostname)` 호출 (D9: raw `*redis.Client` 직접 주입 금지 — 컴파일 불가). 각 fallible 단계 실패 시 `fmt.Errorf("init step %s failed: %w", stepName, err)` (stepName ∈ spec.md REQ-SERVER-002-E1 enum) + `partialCleanup()` 역순 호출 (`redisClient.Close()` → `pgStore.Close()`만 — 나머지는 Close 없음; 어댑터는 보유한 `redisClient`만 Close, 어댑터 자체 Close 없음).
    - `Run(ctx context.Context) error`: REQ-SERVER-001 dual listener (errgroup), REQ-SERVER-UBI-001-a `SERVER_STARTUP` audit row, REQ-SERVER-UBI-001-c shutdown 대기.
    - `shutdown(ctx context.Context, reason string)`: REQ-SERVER-003 (S2에서 본격 구현; S1에서는 stub).
 2. **`apps/control-plane/cmd/server/main.go` 신규** (약 50 LOC):
    - `func main()`: logger 생성 → `config.Load()` → `signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)` → `srv, err := server.New(cfg, logger)` → `if err != nil { os.Exit(1) }` → `if err := srv.Run(ctx); err != nil { os.Exit(1) }` → `os.Exit(0)`.
 3. **`apps/control-plane/cmd/server/server_test.go` (S1 portion)**:
-   - `TestServerNew_DependencyOrder`: mock store + mock redis + mock OIDC; 각 단계 호출 순서를 captured slice로 검증.
-   - `TestServerNew_PgPingFailure`: `pgStore.Ping` returns error → `Server.New()` returns wrapped error, `redisClient` 미생성 확인.
-   - `TestServerNew_RedisPingFailure`: redis Ping 실패 → pg store close 확인 (reverse cleanup).
-   - `TestServerNew_AuthDisabledSkipsOIDC`: `cfg.AuthEnabled=false` → OIDCClient 생성 skip, `srv.oidcClient == nil` 확인.
-   - `TestServerRun_PortConflict`: pre-bound listener로 :50051 점유 → `Server.Run()` returns wrapped error.
-   - `TestServerRun_BothListenersBind`: 임의 free port 2개로 errgroup 동작 검증 + immediate `cancel(ctx)` 호출 후 errgroup return.
+   - `TestServerNew_DependencyOrder`: 호출 순서를 captured slice로 검증. 기대 slice = `["pg_store","pg_ping","redis_client","redis_ping","oidc_client","jwks_warmup","token_validator","refresh_store","recorder","tx_coordinator","state_machine","celery_dispatcher","workflow_service","rest_handler","auth_chain"]` (spec.md REQ-SERVER-002-E1 enum과 동일; testcontainers 또는 hook으로 실제 단계 진입 시점 기록).
+   - `TestServerNew_PgPingFailure`: 연결 불가 DSN으로 `store.NewPgWorkflowStore` 또는 후속 `pgStore.Ping(ctx)` 실패 → `Server.New()` returns error with `"init step pg_store failed"` 또는 `"init step pg_ping failed"`, `redisClient` 미생성 확인.
+   - `TestServerNew_RedisPingFailure`: redis 미가용 주소로 `redisClient.Ping(ctx).Err()` 실패 → wrapped `"init step redis_ping failed"` + `pgStore.Close()` 1회 호출 확인 (reverse cleanup).
+   - `TestServerNew_AuthDisabledSkipsOIDC`: `cfg.AuthEnabled=false` → 단계 (e) 전체 skip, `srv.oidcClient == nil && srv.jwksCache == nil` 확인, captured slice에 `oidc_client`/`jwks_warmup` 미포함.
+   - `TestServerRun_PortConflict`: pre-bound listener로 gRPC addr 점유 → `Server.Run()` returns wrapped error (`errors.Is(err, syscall.EADDRINUSE)`).
+   - `TestServerRun_BothListenersBind`: 임의 free port 2개(`:0`)로 errgroup 동작 검증 + immediate `cancel(ctx)` 호출 후 errgroup return.
 
 **Verification**:
 - `go test ./cmd/server/... -race -count=1` 6개 단위 테스트 통과
@@ -140,10 +168,10 @@ S3 (Health/Readiness probes + full-stack E2E + AUTH-002 chain mount 검증)
 
 1. **`apps/control-plane/cmd/server/probes.go` 신규** (약 100 LOC):
    - `func livenessHandler(w http.ResponseWriter, r *http.Request)`: REQ-SERVER-004-E1 정적 응답.
-   - `func readinessHandler(s *Server) http.HandlerFunc`: REQ-SERVER-004-E2 3 ping 병렬 (`errgroup` 또는 `sync.WaitGroup`), REQ-SERVER-004-U1 timeout, REQ-SERVER-004-S1 shutdown 중 503.
+   - `func readinessHandler(s *Server) http.HandlerFunc`: REQ-SERVER-004-E2 checks 병렬 (`errgroup` 또는 `sync.WaitGroup`) — (i) `s.pgStore.Ping(ctx)` (S0 메서드), (ii) `s.redisClient.Ping(ctx).Err()` (go-redis), (iii) `cfg.AuthEnabled` 시 `s.jwksCache.Reachable(ctx)` (S0 메서드, bool — false면 `"failed: jwks unreachable"`). REQ-SERVER-004-U1 timeout(`cfg.ReadyProbeTimeoutSeconds`), REQ-SERVER-004-S1 shutdown 중 503.
    - `type grpcHealthServer struct { srv *Server }`: REQ-SERVER-004-E3 implements `grpc_health_v1.HealthServer.Check(ctx, req) (*HealthCheckResponse, error)`. Watch는 unimplemented 반환.
 2. **`apps/control-plane/cmd/server/server.go`** 통합:
-   - `restMux := http.NewServeMux(); restMux.HandleFunc("GET /health", livenessHandler); restMux.HandleFunc("GET /ready", readinessHandler(s)); restMux.Handle("/", chain.BuildRESTChain(s.restHandler.Mux(), s.tokenValidator, s.auditRecorder, cfg.AuthEnabled))` — `/health` / `/ready`는 chain 외부에 등록하여 인증 bypass.
+   - `restMux := http.NewServeMux(); restMux.HandleFunc("GET /health", livenessHandler); restMux.HandleFunc("GET /ready", readinessHandler(s)); restMux.Handle("/", auth.BuildRESTChain(s.restHandler.Mux(), s.tokenValidator, s.recorder, cfg.AuthEnabled))` — `/health` / `/ready`는 chain 외부에 등록하여 인증 bypass. (`auth.BuildRESTChain` 4번째 인자는 `s.recorder` = `audit.NewRecorder(cfg.AuthEnabled)` 산출물, spec.md §2.0 검증.)
    - gRPC: `grpc_health_v1.RegisterHealthServer(grpcServer, &grpcHealthServer{srv: s})`.
 3. **`apps/control-plane/cmd/server/server_e2e_test.go` 신규** (build tag `//go:build integration`, 약 150 LOC):
    - testcontainers-go 사용: `postgres:15-alpine` + `redis:7-alpine` + 정적 JWKS HTTP server(httptest)
@@ -192,7 +220,7 @@ S3 (Health/Readiness probes + full-stack E2E + AUTH-002 chain mount 검증)
 
 ### AUTH-002 §5 Exclusion #12 정식 해소
 
-본 SPEC GREEN 종료 시 AUTH-002 §5 Exclusion #12("cmd/server/server.go 부트스트랩")는 **historical only** 상태로 전환된다. AUTH-002 spec.md 자체는 수정하지 않으며(frozen), 본 SPEC HISTORY 0.1.0에 unblock fact를 명시한다. 추후 AUTH-002 chore commit 가능: `## HISTORY` 항목으로 `0.1.3 (TBD): SPEC-AX-SERVER-001 v0.1.0 GREEN으로 §5 Exclusion #12 RESOLVED 메모 추가`. 본 SPEC 책임 외.
+본 SPEC GREEN 종료 시 AUTH-002 §5 Exclusion #12("cmd/server/server.go 부트스트랩")는 **historical only** 상태로 전환된다. AUTH-002 spec.md 자체는 수정하지 않으며(frozen), 본 SPEC HISTORY에 unblock fact를 명시한다. 추후 AUTH-002 chore commit 가능: `## HISTORY` 항목으로 `0.1.3 (TBD): SPEC-AX-SERVER-001 v0.1.1 GREEN으로 §5 Exclusion #12 RESOLVED 메모 추가`. 본 SPEC 책임 외.
 
 ### CTRL-001 Sprint 7 T-AX-006 closed
 
@@ -219,7 +247,8 @@ AUTH-001 `auth_e2e_test.go` `TestE2E_Auth_RBACForbidden`의 `t.Skip` 제거는 A
 
 ## 6. Definition of Done
 
-- [ ] S0 deliverable 3건 모두 PR merged + `go build ./...` 성공
+- [ ] S0 deliverable 6건 모두 PR merged + `go build ./...` 성공 (audit const 3개 + config field 2개 + `pg_store.go` Ping 메서드 + `jwks_cache.go` Reachable 메서드(mu.RLock 준수) + `scheduler/redis_adapter.go` 신규 어댑터 + go.mod errgroup/redis require)
+- [ ] S0 신규 메서드/파일 단위 테스트 통과: `TestPgWorkflowStore_Ping` + `TestJWKSCache_Reachable`(`-race`) + `TestRedisClientAdapter_RPushPing` (compile-time `var _ scheduler.RedisClient = (*RedisClientAdapter)(nil)` 포함)
 - [ ] S1 단위 테스트 6개 통과 (`go test ./cmd/server/... -race`)
 - [ ] S2 단위 테스트 4개 통과 + `goleak` 0 goroutine leak
 - [ ] S3 E2E 4개 통과 (`go test -tags=integration ./cmd/server/...`)
@@ -229,7 +258,8 @@ AUTH-001 `auth_e2e_test.go` `TestE2E_Auth_RBACForbidden`의 `t.Skip` 제거는 A
 - [ ] coverage ≥ 85% on `cmd/server/` package
 - [ ] @MX tags 추가: `Server.Run` ANCHOR, `Server.shutdown` WARN+REASON, `main()` NOTE, `readinessHandler` ANCHOR
 - [ ] acceptance.md 12+ AC 모두 PASS
-- [ ] AUTH-002 §5 Exclusion #12 historical 메모 본 SPEC HISTORY 0.1.0에 명시 (이미 명시됨)
+- [ ] AUTH-002 §5 Exclusion #12 historical 메모 본 SPEC HISTORY에 명시 (이미 명시됨)
+- [ ] 모든 wiring 단계가 spec.md §2.0 검증 API만 사용 (phantom API 0건 — plan-audit iteration 1 D1~D6 회귀 방지; iteration 2 D9 redis 어댑터 경유 확인 — raw `*redis.Client` 직접 dispatcher 주입 0건)
 
 ---
 
