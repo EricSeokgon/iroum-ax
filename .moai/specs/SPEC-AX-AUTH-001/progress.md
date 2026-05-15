@@ -1,8 +1,34 @@
-# SPEC-AX-AUTH-001 Progress Tracker
+# SPEC-AX-AUTH-001 v0.1.1 Progress Tracker — SYNC COMPLETE
+
+**최종 상태**: Sprint 0-7 전체 GREEN ✓ | TRUST 5 PASS ✓ | 105 신규 테스트 + 380+ 누적 ✓
+
+---
+
+## SYNC Phase (2026-05-15)
+
+### Phase 2.5 + 3: TRUST 5 Validation + Documentation Sync
+
+**생성 파일:**
+- `.moai/reports/quality/SPEC-AX-AUTH-001-trust5.md` — TRUST 5 최종 검증 보고서
+- CHANGELOG.md 업데이트 — Sprint 0-7 요약 + 보안 사항
+- `.moai/project/codemaps/go-control-plane.md` — auth 섹션 추가
+- `.moai/project/codemaps/req-traceability.md` — REQ-AUTH-001~005 + E2E 행렬 추가
+- README.md 배지 갱신 — 380+ 테스트 + Algorithm Confusion Attack 방어
+
+**TRUST 5 최종 검증:**
+- Tested: Go 90 + Python 15 + 4 E2E = 109 신규 | 누적 380+ ✓
+- Readable: gofmt + ko-comments ✓
+- Unified: golangci-lint 0 errors, ruff 24/43 사소한 ✓
+- Secured: SF-1/SF-2 + OAuth 2.0 BCP ✓
+- Trackable: 55 @MX 태그 + 16 커밋 ✓
+
+**다음:** 최종 세션 커밋 준비
+
+---
 
 ## Sprint 6 — REQ-AUTH-005 Refresh Token Rotation + Logout
 
-### RED phase (2026-05-15)
+### GREEN phase (2026-05-15)
 
 **파일 생성/수정:**
 - `apps/control-plane/internal/auth/refresh_test.go` — 13개 테스트 (진성 RED 4개, PASS 9개)

@@ -352,9 +352,79 @@ LOG_LEVEL=info                                    # 기본: info
 
 ---
 
+## 8. 인증 및 권한 관리 (`internal/auth/`, `pipelines/auth/`) — SPEC-AX-AUTH-001
+
+### Go 인증 모듈 (`apps/control-plane/internal/auth/`)
+
+| 파일 | 책임 | fan_in | @MX 태그 |
+|------|------|--------|----------|
+| validator.go | TokenValidator: JWT sig + iss(SF-1) + alg/kty(SF-2) + aud/exp 검증 | 4 | ANCHOR |
+| oidc.go | OIDCClient: Discovery + JWKS 지원 | 2 | - |
+| jwks_cache.go | JWKSCache: TTL 3600s + max-age 4h stale-while-revalidate | 3 | - |
+| middleware.go | UnaryInterceptor(gRPC) + RESTMiddleware + Health bypass | 5 | ANCHOR |
+| rbac.go | ParseRolesFromScope + EffectivePermissions + Authorize + LogForbidden | 4 | ANCHOR |
+| refresh.go | RefreshService: RefreshSession + Logout + OAuth 2.0 BCP family invalidation | 2 | ANCHOR |
+| errors.go | 11 sentinel errors (ErrTokenExpired, InvalidIssuer/SF-1, AlgorithmKeyMismatch/SF-2, ...) | many | - |
+| context.go | WithUser(ctx, user) + UserFromContext(ctx) | 3+ | - |
+
+### Python 인증 모듈 (`pipelines/auth/`)
+
+| 파일 | 책임 | 테스트 | 비고 |
+|------|------|--------|------|
+| validator.py | TokenValidator: 동기 JWT 검증 (SF-1/SF-2) | 7 | FastAPI 통합 |
+| errors.py | TokenError, InvalidIssuerError, AlgorithmKeyMismatchError | - | - |
+| celery_auth.py | async user_id 추출 (envelope.headers → context) | 8 | Celery 콜백 |
+
+### 보안 방어
+
+**SF-1 (Issuer Spoofing)**:
+- RFC 7519 §4.1.1 발행자 검증
+- 각 토큰의 'iss' 클레임을 Keycloak 자체 호스트 URL과 정확히 비교
+- Cross-realm 토큰 재사용 공격 차단
+
+**SF-2 (Algorithm Confusion Attack)**:
+- JWT alg 헤더 추출 → 허용 목록(RS256/EdDSA/ES256) 확인
+- JWKS 키의 kty(RSA/EC/OKP) 추출
+- alg ↔ kty 교차 검증 (예: alg=RS256 → kty=RSA 요구)
+- OWASP JWT cheat sheet 준수
+
+**OAuth 2.0 BCP 준수**:
+- Refresh token rotation: 각 갱신 시 새 토큰 발급
+- Family invalidation: 재사용된 refresh_token 발견 시 entire family 무효화
+- Token blacklist: Logout 시 refresh_token_family 기록
+
+### 테스트 매트릭스
+
+| 범주 | 테스트 | 커버리지 |
+|------|--------|----------|
+| JWT Validator | 19개 (SF-1/SF-2/alg/aud/exp/kid) | 92% |
+| OIDC + JWKS | 17개 (Discovery/TTL/stale-while-revalidate/concurrent) | 85% |
+| Middleware | 20개 (gRPC/REST/Health/AuthDisabled/malformed) | 95%+ |
+| RBAC | 18개 (3역할 매트릭스/admin/analyst/viewer) | 85% |
+| Refresh/Logout | 13개 (family invalidation/reuse detection) | 90% |
+| Python FastAPI | 7개 (TokenValidator 동기 호출) | 80% |
+| Celery Cross-SPEC | 8개 (envelope.headers.user_id 전파) | 85% |
+| E2E | 4 PASS + 1 SKIP (REST handler SPEC-AX-AUTH-002 연기) | - |
+| **합계** | 105 신규 테스트 | ~87% avg |
+
+### 의존성
+
+**Go**:
+- github.com/golang-jwt/jwt/v5 (JWT parsing + validation)
+- github.com/coreos/go-oidc/v3 (OIDC Discovery)
+- github.com/MicahParks/keyfunc/v3 (JWKS fetching)
+
+**Python**:
+- PyJWT[cryptography] (JWT validation)
+- authlib (OIDC client, OAuth 2.0)
+
+---
+
 ## 후속 SPEC 후보
 
+- **SPEC-AX-AUTH-002**: RBAC REST handler 통합 (E2E SKIP 항목)
+- **SPEC-AX-AUTH-EGOV-001**: 전자정부 표준 인증 (KEPCO 요구 시)
+- **SPEC-AX-AUTH-MFA-001**: 다단계 인증 (2FA/TOTP)
 - **SPEC-AX-COV-001**: 통합 커버리지 측정 도구
 - **SPEC-AX-AUD-001**: internal/audit 에러 경로 보강
-- **SPEC-AX-AUTH-001**: gRPC reflection + TLS (프로덕션)
 - **SPEC-AX-RETRY-001**: Celery retry 정책 (exponential backoff)

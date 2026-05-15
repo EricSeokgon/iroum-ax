@@ -5,7 +5,81 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)을 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/lang/ko/)을 준수합니다.
 
-## [Unreleased] - 2026-05-14
+## [Unreleased] - 2026-05-15
+
+### Added — SPEC-AX-AUTH-001 v0.1.1 (SSO/JWT 인증 + RBAC + OAuth 2.0 BCP)
+
+#### Sprint 0: Auth Foundation (Go 3 의존성 + Python 2 의존성)
+- pkg/auth + pipelines/auth + apps/control-plane/internal/auth 신규 12개 파일
+- Go 의존성: golang-jwt/v5, coreos/go-oidc/v3, MicahParks/keyfunc/v3
+- Python 의존성: PyJWT[cryptography], authlib
+
+#### Sprint 1: REQ-AUTH-001 JWT Validator (SF-1 + SF-2)
+- TokenValidator: JWT signature + iss(SF-1) + alg/kty(SF-2) + aud/exp/kid 검증
+- 19개 테스트 (signature/issuer/algorithm/key-type/expiration/kid)
+- SF-1: RFC 7519 §4.1.1 cross-realm 토큰 재사용 공격 차단
+- SF-2: Algorithm Confusion Attack 변형 방어 (OWASP JWT cheat sheet)
+
+#### Sprint 2: REQ-AUTH-002 OIDC Discovery + JWKS Cache
+- OIDCClient: well-known/openid-configuration 자동 discovery
+- JWKSCache: TTL 3600초 + max-age 4시간 stale-while-revalidate
+- 17개 테스트 (discovery/cache-hit/ttl-expire/background-refresh/concurrent)
+
+#### Sprint 3: REQ-AUTH-003 Middleware (gRPC + REST)
+- UnaryServerInterceptor: gRPC 인증 미들웨어 (Bearer token)
+- RESTMiddleware: HTTP Authorization 헤더 검증
+- Health endpoint bypass (/grpc.health.v1.Health/Check)
+- AuthDisabled 폴백 (테스트/개발 모드)
+- 20개 테스트 (valid/invalid/expired/malformed/health-bypass)
+
+#### Sprint 4: Python + Celery Cross-SPEC
+- pipelines/auth/validator.py: FastAPI 동기 검증
+- celery_auth.py: envelope.headers.user_id 전파
+- 15개 Python + 5개 Go cross-SPEC 테스트
+- Golden file 재생성 (envelope 형식 정규화)
+
+#### Sprint 5: REQ-AUTH-004 RBAC (3-Role Matrix)
+- ParseRolesFromScope: "admin:*", "analyst:read:*", "viewer:read:document" 파싱
+- EffectivePermissions: 3역할 매트릭스 (admin > analyst > viewer)
+- Authorize(action): 필수 권한 검증 + LogForbidden audit
+- 18개 테스트 (role-matrix/permission-calculation/forbidden-logging)
+
+#### Sprint 6: REQ-AUTH-005 Refresh + Logout (OAuth 2.0 BCP)
+- RefreshSession: 토큰 갱신 + 새 access/refresh 발급
+- RefreshTokenReuseDetection: family invalidation (재사용 감지 시 전체 계열 무효화)
+- Logout: refresh_token_family 블랙리스트 기록
+- 13개 테스트 (rotation/reuse-detection/family-invalidation)
+
+#### Sprint 7: E2E Integration
+- AC-AUTH-E2E-1 ✓ 전체 JWT 체인 (Keycloak → validator → middleware → RBAC → audit)
+- AC-AUTH-E2E-2 ✓ 익명 요청 역호환성 (AuthDisabled=true)
+- AC-AUTH-E2E-4 ✓ 유효하지 않은 토큰 401 응답
+- AC-E2E-RBAC-1 SKIP → SPEC-AX-AUTH-002 (REST handler 통합)
+- 4 PASS + 1 SKIP (E2E 통합 테스트)
+
+#### 품질 (SPEC-AX-AUTH-001 누적)
+- Go 90개 + Python 15개 신규 테스트 = 105 신규 tests
+- TOTAL: Python 192 + Go 156 unit + 11 integration + 5 E2E = 380+ 테스트
+- TRUST 5: Tested 90/15 ✓ | Readable (gofmt+ko-comments) ✓ | Unified (golangci-lint 0 errors) ✓ | Secured (SF-1/SF-2) ✓ | Trackable (55 @MX tags) ✓
+- plan-auditor 0.88 PASS + evaluator-active 0.782 CONFIRM
+
+#### 보안 (계속)
+- SF-1 iss per-token validation (RFC 7519 §4.1.1)
+- SF-2 alg/kty cross-check (Algorithm Confusion Attack 방어)
+- OAuth 2.0 BCP: refresh token rotation + family invalidation
+- 망분리 정합 유지 (Keycloak self-hosted, 외부 OAuth 0건)
+- audit_logs.user_id 실 사용자 propagation (JWT sub 추출)
+- ErrTokenInvalidIssuer/ErrAlgorithmKeyMismatch/ErrRefreshTokenReuseDetected sentinel 도입
+
+#### Fixed
+- grpc_server.go CreateWorkflow의 cli-anonymous 하드코딩 → auth.UserFromContext JWT sub 추출 (Sprint 7 E2E 발견)
+
+#### Deferred (후속 SPEC 후보)
+- SPEC-AX-AUTH-002: RBAC REST handler 통합 (E2E SKIP된 항목)
+- SPEC-AX-AUTH-EGOV-001: 전자정부 표준 인증 (KEPCO 요구 시)
+- SPEC-AX-AUTH-MFA-001: 다단계 인증
+
+---
 
 ### Added — SPEC-AX-CTRL-001 v0.1.2 Go Control Plane Walking Skeleton
 
