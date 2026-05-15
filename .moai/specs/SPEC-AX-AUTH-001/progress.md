@@ -1,5 +1,65 @@
 # SPEC-AX-AUTH-001 Progress Tracker
 
+## Sprint 6 — REQ-AUTH-005 Refresh Token Rotation + Logout
+
+### RED phase (2026-05-15)
+
+**파일 생성/수정:**
+- `apps/control-plane/internal/auth/refresh_test.go` — 13개 테스트 (진성 RED 4개, PASS 9개)
+- `apps/control-plane/internal/auth/refresh.go` — Sprint 0 stub 확장: RefreshService, RefreshSession, Logout 시그니처 추가; RefreshTokenStore 인터페이스 AddToFamily/GetFamilyMembers 메서드 추가; BlacklistJTI 시그니처 변경 (ttlSecs int64 → time.Time)
+- `apps/control-plane/internal/audit/audit.go` — ActionAuthLogout, ActionAuthRefreshReuseDetected 상수 추가
+- `.moai/sprints/SPEC-AX-AUTH-001/sprint-REQ-AUTH-005.md` — Sprint Contract (Priority: Security — OAuth 2.0 BCP critical)
+
+**의존성 추가:** 없음 (기존 auth/audit 패키지 사용)
+
+**AC 완료 수:** 0 / 10 (RED phase — 미구현 상태가 정상)
+
+**테스트 상태 (Sprint 6 신규 — 13개):**
+- FAIL (진성 RED): 4개
+  - TestRefreshSession_HappyPath_NewPairReturned: stub "구현 예정" → require.NoError FAIL
+  - TestRefreshSession_AlreadyUsedToken_InvalidatesFamily: stub 에러 ≠ ErrRefreshTokenReuseDetected + family 미무효화
+  - TestLogout_BlacklistsAccessAndRefreshTokens: stub "구현 예정" → require.NoError FAIL
+  - TestLogout_RecordsAuditEvent: stub "구현 예정" → require.NoError FAIL
+- PASS: 9개
+  - TestRefreshTokenStore_* 4개 (fakeStore 자체 검증)
+  - TestRefreshSession_BlacklistedJTI_ReturnsError (stub 에러 → require.Error 통과)
+  - TestRefreshSession_ExpiredRefreshToken_ReturnsError (stub 에러 → require.Error 통과)
+  - TestLogout_InvalidToken_ReturnsError (stub 에러 → require.Error 통과)
+  - TestAuditAction_AuthLogout_Defined (상수 정의 확인)
+  - TestAuditAction_AuthRefreshReuseDetected_Defined (상수 정의 확인)
+- Total: 13개 테스트
+
+**RED 실패 이유 (진성, Lesson #4 준수):**
+- RefreshSession: stub `errors.New("구현 예정: Sprint 6 GREEN")` → require.NoError FAIL / ErrRefreshTokenReuseDetected 불일치
+- Logout: stub `errors.New("구현 예정: Sprint 6 GREEN")` → require.NoError FAIL
+
+**Sprint 1-5 회귀:**
+- scheduler/server/store/workflow/audit 패키지: OK (auth만 FAIL)
+- auth 패키지 Sprint 1-5 테스트: Sprint 6 RED 파일로 인한 패키지 빌드 실패 포함
+
+**에러 델타:** +4 신규 진성 FAIL
+
+**신규 심볼:**
+- `auth.ErrRefreshTokenReuseDetected` — OAuth 2.0 BCP reuse 탐지 에러
+- `auth.ErrRefreshTokenExpired` — refresh token 만료 에러
+- `auth.RefreshTokenStore` — 인터페이스 확장 (AddToFamily, GetFamilyMembers 추가; BlacklistJTI 시그니처 변경)
+- `auth.RefreshTokenPair` — 새 access/refresh 쌍 구조체
+- `auth.TokenIssuer` — token 발급 인터페이스
+- `auth.AuditLogger` — 감사 이벤트 기록 인터페이스
+- `auth.RefreshService` — refresh rotation + logout 서비스
+- `auth.NewRefreshService(store, validator, issuer, auditLogger)` — 생성자
+- `auth.RefreshService.RefreshSession(ctx, oldRefreshToken)` — stub
+- `auth.RefreshService.Logout(ctx, accessToken, refreshToken)` — stub
+- `audit.ActionAuthLogout = "AUTH_LOGOUT"` — 신규 상수
+- `audit.ActionAuthRefreshReuseDetected = "AUTH_REFRESH_REUSE_DETECTED"` — 신규 상수
+
+**다음 단계:** Sprint 6 GREEN
+- RefreshSession: validator.Verify → jti/family_id 추출 → family reuse check → 새 pair 발급
+- Logout: 두 jti 블랙리스트 등록 (TTL=exp) + AUTH_LOGOUT 감사 이벤트
+
+---
+
+
 > Format: Sprint → Phase → 날짜 → AC 완료 수 / 전체 → 에러 델타
 > Re-planning Gate: AC 완료율 0% + 3연속 → 트리거
 

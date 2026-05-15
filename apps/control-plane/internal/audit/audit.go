@@ -32,6 +32,12 @@ const (
 	// ActionAuthForbidden RBAC 권한 부족으로 접근 거부
 	// REQ-AUTH-004-U1: HTTP 403 / gRPC PERMISSION_DENIED 시 기록
 	ActionAuthForbidden Action = "AUTH_FORBIDDEN"
+	// ActionAuthLogout 사용자 로그아웃 — access token + refresh token 블랙리스트 등록
+	// REQ-AUTH-005-E1: POST /api/v1/auth/logout 성공 시 기록
+	ActionAuthLogout Action = "AUTH_LOGOUT"
+	// ActionAuthRefreshReuseDetected refresh token family reuse 공격 탐지
+	// REQ-AUTH-005-U1: OAuth 2.0 BCP — 이미 사용된 refresh token 재사용 시 family 전체 invalidation 후 기록
+	ActionAuthRefreshReuseDetected Action = "AUTH_REFRESH_REUSE_DETECTED"
 )
 
 // Event 감사 로그 이벤트 엔티티
