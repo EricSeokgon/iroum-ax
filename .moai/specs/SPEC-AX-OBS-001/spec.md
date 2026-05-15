@@ -1,7 +1,7 @@
 ---
 id: SPEC-AX-OBS-001
 version: 0.1.2
-status: draft
+status: completed
 created: 2026-05-15
 updated: 2026-05-15
 author: ircp

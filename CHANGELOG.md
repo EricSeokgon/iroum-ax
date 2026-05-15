@@ -7,6 +7,35 @@
 
 ## [Unreleased] - 2026-05-15
 
+### Added — SPEC-AX-OBS-001 v0.1.2 (Prometheus Metrics + OpenTelemetry Tracing Skeleton)
+- **Metrics Registry**: `prometheus/client_golang` 기반 레지스트리 싱글톤 (`internal/metrics/registry.go`)
+- **7개 core collector**: `iroum_ax_http_{requests,latency}`, `iroum_ax_grpc_{requests,latency}`, `iroum_ax_workflow_state_transitions_total`, `iroum_ax_auth_rejections_total{reason}`, `iroum_ax_authz_forbidden_total{permission}`, `iroum_ax_celery_tasks_{total,latency}`, `iroum_ax_pg_pool_connections` (GaugeFunc)
+- **`/metrics` Endpoint + RBAC**: `read:metrics` 권한(OBS 자체 permission registry) + `MetricsAuthMiddleware` (authn: `auth.TokenValidator.Verify`, authz: `metrics.IsMetricsAuthorized`, 401/403 분리)
+- **HTTP Instrumentation**: `MetricsMiddleware` (chain 최외곽 — probe/metrics 경로 제외, REQ-OBS-003-S1)
+- **gRPC Instrumentation**: `UnaryMetricsInterceptor` (chain 최외곽 — 인증 실패도 계측)
+- **Dependency Inversion (circular import 영구 해소)**: `internal/auth/observer.go` — `RejectionObserver interface` 선언; `auth.TokenValidator.Verify` → observer hook; `cmd/server/server.go` DI wire point
+- **OTel Tracing Skeleton**: `internal/observability/tracer.go` — `InitTracerProvider(cfg)` + AlwaysSample + noop exporter (망분리 정합; OTLP exporter Sprint 3 deferred)
+- **Authz mapping**: `authz_mapping.go`에 `GET /metrics → read:metrics` 추가
+- **Scheduler/Workflow 계측**: `dispatcher.go` celery task counter + `state_machine.go` workflow transition counter (직접 import — no cycle)
+- 24/24 AC GREEN, evaluator-active CONFIRM 89.0 (3 rounds), metrics 87.2% / observability 100%
+
+### Quality (OBS-001)
+- **plan-auditor**: iter 1 PASS 0.97 (CONFIRM — spec-to-code 0 contradictions)
+- **evaluator-active**: R1 0.67.8 → DISPUTE 8건 → R2 79.0 → 3건 → R3 CONFIRM 89.0 (24/24 AC GREEN)
+- **TRUST 5**: [PASS] Tested 0.87 | Readable 0.90 | Unified 0.88 | Secured 0.87 | Trackable 0.85
+
+### Fixed (OBS-001)
+- SPEC-AX-AUTH-002 v0.1.2 §5 Exclusion #13 공식 해소 (`read:metrics` 권한 매핑)
+- SPEC-AX-SERVER-001 v0.1.2 §5 Exclusion #4·#5 공식 해소 (OTel + `/metrics` endpoint)
+- `auth → metrics → auth` circular import 영구 제거 (Dependency Inversion Pattern)
+
+### Deferred (後続 SPEC — OBS-001 범위 외)
+- OTLP exporter wire (Sprint 3 — 망분리 환경 설계 후 진행)
+- e2e_test.go goRedisAdapter cleanup (redis_adapter.go 통합 후 중복 제거)
+- dispatcher_test.go:549 pre-existing race 수정
+
+---
+
 ### Added — SPEC-AX-SERVER-001 v0.1.2 (Server Bootstrap + Dual Listener)
 - **Sprint 0**: PgWorkflowStore.Ping + JWKSCache.Reachable + redis_adapter.go (goRedisAdapter production promotion) + 3 server lifecycle audit actions
 - **Sprint 1**: cmd/server/{server,probes,main}.go (package main 전환) — 11-step dependency wiring + errgroup dual listener + signal.NotifyContext

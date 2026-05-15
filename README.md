@@ -5,8 +5,8 @@
 [![License: Private](https://img.shields.io/badge/License-Private-red.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](pyproject.toml)
 [![Go](https://img.shields.io/badge/go-1.22-00ADD8.svg)](go.mod)
-[![Tests](https://img.shields.io/badge/tests-445+_passing-brightgreen.svg)](#)
-[![SPEC](https://img.shields.io/badge/SPECs-5_GREEN-purple.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-465+_passing-brightgreen.svg)](#)
+[![SPEC](https://img.shields.io/badge/SPECs-6_GREEN-purple.svg)](#)
 [![Security](https://img.shields.io/badge/Algorithm_Confusion_Attack-Defended-blue.svg)](#)
 
 > 한국 공공기관 경영평가 보고서 자동화 AI 플랫폼 — KEPCO E&C anchor
@@ -21,7 +21,7 @@ KEPCO E&C anchor 고객 대상 경영평가 자동화 플랫폼. HWP 문서 수�
 
 ## 프로젝트 상태
 
-**Walking Skeleton + Auth 완료** (Sprint 0-7, 2026-05-15)
+**Walking Skeleton + Auth + Observability 완료** (Sprint 0-7 + OBS, 2026-05-15)
 
 **Python 파이프라인** (SPEC-AX-001 v0.1.2)
 - 192개 단위 테스트 통과 (83% 커버리지)
@@ -53,9 +53,17 @@ KEPCO E&C anchor 고객 대상 경영평가 자동화 플랫폼. HWP 문서 수�
 - Health/readiness probes (DB+Redis+JWKS) + audit trail (SERVER_STARTUP/SHUTDOWN)
 - plan-auditor PASS 0.92 + evaluator-active CONFIRM 0.83
 
+**Go 관측성 — Prometheus + OTel** (SPEC-AX-OBS-001 v0.1.2)
+- 7개 core collector (HTTP 지연/gRPC 지연/workflow 전이/auth 거부/celery 작업/pg pool/authz 거부)
+- `/metrics` endpoint + RBAC (`read:metrics` 권한, `MetricsAuthMiddleware` — authn 401 + authz 403 분리)
+- gRPC `UnaryMetricsInterceptor` (chain 최외곽, 인증 실패도 계측)
+- OpenTelemetry tracing skeleton (noop exporter, AlwaysSample — 망분리 정합)
+- Dependency Inversion (`RejectionObserver` interface) via `internal/auth/observer.go` — circular import 영구 해소
+- 24/24 AC GREEN, evaluator-active CONFIRM 89.0 (3 rounds), metrics 87.2% / observability 100%
+
 **품질**
 - TRUST 5 PASS (모든 5가지 차원): Tested ✓ | Readable ✓ | Unified ✓ | Secured ✓ | Trackable ✓
-- 5개 SPEC 통합 완료 (AX-001 + CTRL-001 + AUTH-001 + AUTH-002 + SERVER-001)
+- 6개 SPEC 통합 완료 (AX-001 + CTRL-001 + AUTH-001 + AUTH-002 + SERVER-001 + OBS-001)
 
 ---
 
