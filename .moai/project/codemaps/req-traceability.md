@@ -1,10 +1,34 @@
 # 요구사항 추적성 매트릭스 (req-traceability)
 
-REQ-UBI + REQ-AX-001~005 (Python) + REQ-CTRL-001~005 (Go) + REQ-AUTH-001~005 (Go/Python SSO) 와 구현 파일 · 테스트 파일의 맵핑
+REQ-UBI + REQ-AX-001~005 (Python) + REQ-CTRL-001~005 (Go) + REQ-AUTH-001~005 (Go/Python SSO) + REQ-SERVER-001~004 (Go Server Bootstrap) 와 구현 파일 · 테스트 파일의 맵핑
 
 ---
 
-## SPEC-AX-AUTH-002: RBAC REST/gRPC Handler 통합 (새로 추가)
+## SPEC-AX-SERVER-001: Server Bootstrap + Dual Listener (새로 추가)
+
+### SERVER-001 고유 요구사항
+
+| REQ ID | 설명 | 구현 위치 | 테스트 | 상태 |
+|--------|------|---------|--------|------|
+| REQ-SERVER-001 | Dual listener (gRPC :50051 + REST :8080) | `cmd/server/server.go:169~190` | `server_e2e_test.go` (11 E2E) | PASS |
+| REQ-SERVER-002 | Dependency injection (11-step sequence) | `cmd/server/server.go:66~165` | `server_test.go` (7 tests) | PASS |
+| REQ-SERVER-003 | Graceful shutdown (SIGTERM/SIGINT, 30s timeout) | `cmd/server/server.go:274~330` | `server_e2e_test.go:TestServerShutdown` | PASS |
+| REQ-SERVER-004 | Health/readiness probes (/health, /ready) | `cmd/server/probes.go` | `probes_test.go` (5 tests) | PASS |
+| REQ-SERVER-UBI-001 | Audit trail (SERVER_STARTUP/SHUTDOWN_INITIATED/COMPLETED) | `cmd/server/server.go:78,120,310` | `server_test.go` + E2E | PASS |
+
+### SERVER-001 추가 산출물
+
+| 요구사항 | 상태 | 설명 |
+|----------|------|------|
+| redis_adapter.go promotion | PASS | goRedisAdapter (e2e_test.go test-only) → `internal/scheduler/redis_adapter.go` (production) |
+| PgWorkflowStore.Ping | PASS | Sprint 0 추가 (readiness probe 필요) |
+| JWKSCache.Reachable | PASS | Sprint 0 추가 (readiness probe 필요) |
+
+**테스트 합계**: 19개 단위 + 11개 E2E = 30개 신규 (모두 PASS, cumulative ~445+)
+
+---
+
+## SPEC-AX-AUTH-002: RBAC REST/gRPC Handler 통합
 
 ### AUTH-002 고유 요구사항
 

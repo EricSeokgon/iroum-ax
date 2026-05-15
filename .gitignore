@@ -10,6 +10,8 @@
 # Go Build Artifacts
 # ===========================================
 bin/
+/server
+apps/control-plane/cmd/server/server
 *.exe
 *.exe~
 *.dll

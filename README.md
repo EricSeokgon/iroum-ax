@@ -5,8 +5,8 @@
 [![License: Private](https://img.shields.io/badge/License-Private-red.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](pyproject.toml)
 [![Go](https://img.shields.io/badge/go-1.22-00ADD8.svg)](go.mod)
-[![Tests](https://img.shields.io/badge/tests-410+_passing-brightgreen.svg)](#)
-[![SPEC](https://img.shields.io/badge/SPECs-4_GREEN-purple.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-445+_passing-brightgreen.svg)](#)
+[![SPEC](https://img.shields.io/badge/SPECs-5_GREEN-purple.svg)](#)
 [![Security](https://img.shields.io/badge/Algorithm_Confusion_Attack-Defended-blue.svg)](#)
 
 > 한국 공공기관 경영평가 보고서 자동화 AI 플랫폼 — KEPCO E&C anchor
@@ -46,8 +46,36 @@ KEPCO E&C anchor 고객 대상 경영평가 자동화 플랫폼. HWP 문서 수�
 - AUTH-001 SKIP unblock (grep count=0)
 - plan-auditor PASS 0.92 + evaluator-active CONFIRM 0.8415
 
+**Go Server Bootstrap + Dual Listener** (SPEC-AX-SERVER-001 v0.1.2)
+- 30개 신규 테스트 (19 unit + 11 E2E/integration)
+- cmd/server/{main,server,probes}.go — package main 전환 + 11-step 의존성 주입
+- errgroup dual listener (gRPC :50051 + REST :8080) + graceful shutdown (SIGTERM/SIGINT, 30s timeout)
+- Health/readiness probes (DB+Redis+JWKS) + audit trail (SERVER_STARTUP/SHUTDOWN)
+- plan-auditor PASS 0.92 + evaluator-active CONFIRM 0.83
+
 **품질**
 - TRUST 5 PASS (모든 5가지 차원): Tested ✓ | Readable ✓ | Unified ✓ | Secured ✓ | Trackable ✓
+- 5개 SPEC 통합 완료 (AX-001 + CTRL-001 + AUTH-001 + AUTH-002 + SERVER-001)
+
+---
+
+## 빠른 시작
+
+### 서버 부팅
+
+```bash
+# Control Plane 서버 시작 (Go main 진입점)
+go run ./apps/control-plane/cmd/server
+
+# 또는 테스트 실행
+go test ./apps/control-plane/cmd/server/... -cover
+```
+
+**서버 리스너:**
+- gRPC: `:50051` (protocol buffers)
+- REST: `:8080` (HTTP/JSON)
+- Readiness probe: `GET /ready` (DB + Redis + JWKS 검증)
+- Liveness probe: `GET /health` (항상 200)
 - plan-auditor PASS 0.92 (iter 2), evaluator-active CONFIRM 0.8415 (iter 3)
 - 66개 @MX 태그 (44 ANCHOR + 13 NOTE + 9 WARN)
 - **총 410+ 테스트 (Python 192 + Go 190 + 11 integration + 27 E2E), 55+ 커밋**

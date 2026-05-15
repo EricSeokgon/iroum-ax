@@ -7,6 +7,29 @@
 
 ## [Unreleased] - 2026-05-15
 
+### Added — SPEC-AX-SERVER-001 v0.1.2 (Server Bootstrap + Dual Listener)
+- **Sprint 0**: PgWorkflowStore.Ping + JWKSCache.Reachable + redis_adapter.go (goRedisAdapter production promotion) + 3 server lifecycle audit actions
+- **Sprint 1**: cmd/server/{server,probes,main}.go (package main 전환) — 11-step dependency wiring + errgroup dual listener + signal.NotifyContext
+- **Sprint 2**: graceful shutdown (sync.Once + double-signal force-kill + reverse cleanup) + E2E full-stack (testcontainers)
+- **30 신규 tests** (19 unit + 11 E2E/integration), 누적 ~445+
+- REQ-SERVER-001 dual listener | REQ-SERVER-002 dependency wiring | REQ-SERVER-003 graceful shutdown | REQ-SERVER-004 health/readiness probes
+
+### Quality (continued — SERVER-001)
+- **plan-auditor**: iter 1 FAIL 0.62 (8 phantom API defects) → iter 2 FAIL 0.78 (3 refined) → iter 3 PASS 0.92 (spec-to-code 0 contradictions)
+- **evaluator-active**: CONFIRM 0.83 (integrated wiring validation)
+- **TRUST 5**: [PASS] Tested 0.95 | Readable 0.92 | Unified 0.90 | Secured 0.89 | Trackable 0.88
+
+### Fixed (SERVER-001)
+- 5개 SPEC이 전제했던 cmd/server/server.go stub → production wiring 완성 (통합 결함 정식 해소)
+- CTRL-001 Sprint 7 T-AX-006 gap + AUTH-002 Exclusion #12 unblock
+
+### Deferred (後続 SPEC)
+- SPEC-AX-OBS-001 (Prometheus /metrics + OTel)
+- e2e_test.go goRedisAdapter cleanup (redis_adapter.go로 통합 후 중복 제거)
+- dispatcher_test.go:549 pre-existing race 수정
+
+---
+
 ### Added — SPEC-AX-AUTH-002 v0.1.2 (RBAC REST/gRPC Handler 통합)
 - **Sprint 0+1+2 (통합)**: 메서드-권한 매핑 테이블 + RESTAuthzMiddleware + UnaryAuthzInterceptor + 체인 조합 헬퍼
   - `LookupRESTPermission` / `LookupGRPCPermission` (경로 매개변수 매칭)

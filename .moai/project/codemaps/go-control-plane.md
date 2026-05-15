@@ -11,18 +11,34 @@
 
 ### 1. Entrypoint & Server (`cmd/server/`)
 
-**main.go** (진입점)
-- 환경변수 파서 → config 로드
-- 로거 초기화 (zap)
-- server.Run() 호출
+**main.go** (OS 진입점 — SPEC-AX-SERVER-001 Sprint 1)
+- Environment 변수 파싱 → config.Config 로드
+- Zap logger 초기화
+- server.New() → 의존성 주입 11단계
+- server.Run() → dual listener + graceful shutdown
+- @MX:NOTE: 서버 OS 진입점
 
-**server.go** (gRPC + REST 멀티 플렉싱)
-- gRPC 서버 (port: 50051)
-- REST 서버 (port: 8080, grpc-gateway 패턴)
-- 구조화 JSON 로깅 미들웨어
-- 요청 ID 발급
+**server.go** (Server bootstrap + dual listener — SPEC-AX-SERVER-001 Sprint 0-1)
+- Server.New(ctx, config) → Server struct 생성 (11-step DI: config → store → redis → oidc → jwks → auth → coordinator → dispatcher → handler → chain)
+- Server.Run(ctx) → errgroup 기반 dual listener (gRPC :50051 + REST :8080 concurrent)
+- Server.gracefulShutdown(ctx, 30s) → SIGTERM/SIGINT 처리 + sync.Once idempotency + reverse cleanup
+- @MX:ANCHOR: Server.New, Server.Run, Server.startListeners (fan_in ≥ 3)
+- @MX:WARN: gracefulShutdown (sync.Once 3-component race + double-signal force-kill)
 
-**grpc_handlers.go** (gRPC service 구현)
+**probes.go** (Health/readiness probe — SPEC-AX-SERVER-001 Sprint 1)
+- /health (liveness, 항상 200 OK)
+- /ready (readiness, DB ping + Redis ping + JWKS reachable 검증)
+- DefaultReadinessProbeFn(ctx) → PgWorkflowStore.Ping + RedisClient.Ping + JWKSCache.Reachable 이순차 검증
+- @MX:ANCHOR: DefaultReadinessProbeFn (liveness/readiness 로직 진입점)
+
+**redis_adapter.go** (goRedisAdapter production promotion — SPEC-AX-SERVER-001 Sprint 0)
+- Wraps github.com/redis/go-redis/v9 *redis.Client → scheduler.RedisClient interface
+- RPush(ctx, key, ...values) → client.RPush().Result() (int64, error)
+- Ping(ctx) → client.Ping().Err() (error)
+- Close() → client.Close() (error)
+- Previously test-only goRedisAdapter in e2e_test.go, promoted to production code
+
+**grpc_handlers.go** (gRPC service 구현 — SPEC-AX-CTRL-001)
 - CreateWorkflow RPC
 - GetWorkflow RPC
 - ListWorkflows RPC + pagination
