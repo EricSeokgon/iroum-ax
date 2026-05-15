@@ -131,6 +131,24 @@ func NewJWKSCache(jwksURI string, opts ...JWKSCacheOption) *JWKSCache {
 	return c
 }
 
+// Reachable — 마지막 JWKS fetch가 성공했고 stale 유효 기간 내인지 판정한다.
+//
+// readiness probe(REQ-SERVER-004-E2 (iii)) 전용 신선도 판정 메서드.
+// cacheAge()는 "호출자가 mu.RLock을 보유해야 한다"는 동시성 계약을 갖기 때문에
+// 반드시 mu.RLock() 획득 후 lastSuccessAt/cacheAge()를 읽어야 한다(D11 정정).
+//
+// @MX:NOTE: [AUTO] readiness probe 전용 신선도 판정 메서드 — mu.RLock 보유 필수
+func (c *JWKSCache) Reachable(_ context.Context) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	// lastSuccessAt이 zero이면 한 번도 fetch 성공한 적 없음
+	if c.lastSuccessAt.IsZero() {
+		return false
+	}
+	// staleMaxAge 이내이면 reachable
+	return c.cacheAge() < c.staleMaxAge
+}
+
 // GetKey — kid로 서명 검증 키를 조회한다. JWKSProvider 인터페이스 구현.
 //
 // 캐시 히트 시 < 1ms 성능 목표 (AC-AUTH-002-O1, REQ-AUTH-002 NFR).

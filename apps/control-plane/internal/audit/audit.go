@@ -38,6 +38,16 @@ const (
 	// ActionAuthRefreshReuseDetected refresh token family reuse 공격 탐지
 	// REQ-AUTH-005-U1: OAuth 2.0 BCP — 이미 사용된 refresh token 재사용 시 family 전체 invalidation 후 기록
 	ActionAuthRefreshReuseDetected Action = "AUTH_REFRESH_REUSE_DETECTED"
+
+	// ActionServerStartup 서버 모든 리스너 바인딩 완료 후 기록
+	// REQ-SERVER-UBI-001-a: grpc_addr, rest_addr 기록
+	ActionServerStartup Action = "SERVER_STARTUP"
+	// ActionServerShutdownInitiated SIGTERM/SIGINT 수신 직후 기록
+	// REQ-SERVER-UBI-001-a: signal 수신 시점
+	ActionServerShutdownInitiated Action = "SERVER_SHUTDOWN_INITIATED"
+	// ActionServerShutdownCompleted 모든 리스너 드레인 + 커넥션 종료 후 기록
+	// REQ-SERVER-UBI-001-a: uptime_seconds, exit_reason 기록
+	ActionServerShutdownCompleted Action = "SERVER_SHUTDOWN_COMPLETED"
 )
 
 // Event 감사 로그 이벤트 엔티티

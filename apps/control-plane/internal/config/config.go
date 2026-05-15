@@ -41,6 +41,12 @@ type Config struct {
 	// 기본값: iroum-ax-control-plane
 	OIDCAudience string
 
+	// CeleryQueue Celery 태스크 큐 이름
+	// 환경 변수: CELERY_QUEUE
+	// 기본값: celery
+	// 필드 순서: string 블록 끝에 배치하여 fieldalignment 최적화
+	CeleryQueue string
+
 	// JWKSCacheTTLSeconds — JWKS 캐시 hard TTL (초 단위)
 	// 환경 변수: JWKS_CACHE_TTL_SECONDS
 	// 기본값: 3600 (1시간)
@@ -56,6 +62,16 @@ type Config struct {
 	// 기본값: 30 (OAuth 2.0 BCP RFC 9700 권장치)
 	ClockSkewSeconds int
 
+	// ShutdownTimeoutSeconds SIGTERM 수신 후 graceful shutdown 최대 대기 시간 (초)
+	// 환경 변수: SHUTDOWN_TIMEOUT_SECONDS
+	// 기본값: 30
+	ShutdownTimeoutSeconds int
+
+	// ReadyProbeTimeoutSeconds /ready 프로브 개별 체크 타임아웃 (초)
+	// 환경 변수: READY_PROBE_TIMEOUT_SECONDS
+	// 기본값: 5
+	ReadyProbeTimeoutSeconds int
+
 	// AuthEnabled 인증 미들웨어 활성화 여부
 	// 환경 변수: AUTH_ENABLED (true/false)
 	// 기본값: false (로컬 개발 편의성, backward compat)
@@ -66,17 +82,20 @@ type Config struct {
 // 환경 변수가 설정되지 않은 경우 로컬 개발 기본값을 사용
 func Load() *Config {
 	return &Config{
-		PostgresDSN:            getEnv("POSTGRES_DSN", "postgres://iroum:iroum@localhost:5432/iroum_ax?sslmode=disable"),
-		RedisAddr:              getEnv("REDIS_ADDR", "localhost:6379"),
-		GRPCAddr:               getEnv("GRPC_ADDR", ":50051"),
-		RESTAddr:               getEnv("REST_ADDR", ":8080"),
-		Env:                    getEnv("ENV", "development"),
-		OIDCIssuerURL:          getEnv("OIDC_ISSUER_URL", ""),
-		OIDCAudience:           getEnv("OIDC_AUDIENCE", "iroum-ax-control-plane"),
-		JWKSCacheTTLSeconds:    getIntEnv("JWKS_CACHE_TTL_SECONDS", 3600),
-		JWKSStaleMaxAgeSeconds: getIntEnv("JWKS_STALE_MAX_AGE_SECONDS", 14400),
-		ClockSkewSeconds:       getIntEnv("CLOCK_SKEW_SECONDS", 30),
-		AuthEnabled:            getBoolEnv("AUTH_ENABLED", false),
+		PostgresDSN:              getEnv("POSTGRES_DSN", "postgres://iroum:iroum@localhost:5432/iroum_ax?sslmode=disable"),
+		RedisAddr:                getEnv("REDIS_ADDR", "localhost:6379"),
+		GRPCAddr:                 getEnv("GRPC_ADDR", ":50051"),
+		RESTAddr:                 getEnv("REST_ADDR", ":8080"),
+		Env:                      getEnv("ENV", "development"),
+		OIDCIssuerURL:            getEnv("OIDC_ISSUER_URL", ""),
+		OIDCAudience:             getEnv("OIDC_AUDIENCE", "iroum-ax-control-plane"),
+		JWKSCacheTTLSeconds:      getIntEnv("JWKS_CACHE_TTL_SECONDS", 3600),
+		JWKSStaleMaxAgeSeconds:   getIntEnv("JWKS_STALE_MAX_AGE_SECONDS", 14400),
+		ClockSkewSeconds:         getIntEnv("CLOCK_SKEW_SECONDS", 30),
+		CeleryQueue:              getEnv("CELERY_QUEUE", "celery"),
+		ShutdownTimeoutSeconds:   getIntEnv("SHUTDOWN_TIMEOUT_SECONDS", 30),
+		ReadyProbeTimeoutSeconds: getIntEnv("READY_PROBE_TIMEOUT_SECONDS", 5),
+		AuthEnabled:              getBoolEnv("AUTH_ENABLED", false),
 	}
 }
 

@@ -55,6 +55,19 @@ func NewPgWorkflowStore(ctx context.Context, dsn string, logger *zap.Logger) (*P
 	return &PgWorkflowStore{pool: pool, logger: logger}, nil
 }
 
+// Ping PostgreSQL 연결 풀의 연결 상태를 확인한다.
+//
+// readiness probe(REQ-SERVER-004-E2) + startup abort(REQ-SERVER-002-U1) 양쪽에서 재사용.
+// NewPgWorkflowStore 생성자 내부의 pool.Ping과 별개로 런타임 readiness를 재확인한다.
+//
+// @MX:NOTE: [AUTO] readiness probe + startup abort 양쪽에서 호출되는 경량 liveness 메서드
+func (s *PgWorkflowStore) Ping(ctx context.Context) error {
+	if err := s.pool.Ping(ctx); err != nil {
+		return fmt.Errorf("postgres ping 실패: %w", err)
+	}
+	return nil
+}
+
 // Close pgx 연결 풀을 닫음 — 테스트 정리(t.Cleanup)에서 호출
 func (s *PgWorkflowStore) Close() {
 	if s.pool != nil {
