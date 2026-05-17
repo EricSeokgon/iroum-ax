@@ -1,10 +1,10 @@
 ---
 id: SPEC-AX-AUTH-003
 version: "0.1.0"
-status: draft
+status: completed
 created_at: "2026-05-15"
 labels: ["auth", "abac", "security", "air-gapped"]
-updated: "2026-05-15"
+updated: "2026-05-18"
 author: ircp
 priority: high
 issue_number: null
@@ -14,6 +14,7 @@ issue_number: null
 
 ## HISTORY
 
+- v0.1.0 (2026-05-18): Run 완료. evaluator-active PASS 0.905. 30 AC 검증, 98.5% 커버리지.
 - 2026-05-15 v0.1.0 (draft): 최초 작성. SPEC-AX-AUTH-001/002 위에 속성 조건을 얹는 경량 ABAC 계층 정의. 외부 의존성 없음(망분리 호환), AUTH-001/002 코드 무변경(server.go 와이어링만), 검증된 API 표 기반.
 
 ---

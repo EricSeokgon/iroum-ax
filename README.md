@@ -5,8 +5,8 @@
 [![License: Private](https://img.shields.io/badge/License-Private-red.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](pyproject.toml)
 [![Go](https://img.shields.io/badge/go-1.22-00ADD8.svg)](go.mod)
-[![Tests](https://img.shields.io/badge/tests-465+_passing-brightgreen.svg)](#)
-[![SPEC](https://img.shields.io/badge/SPECs-6_GREEN-purple.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-490+_passing-brightgreen.svg)](#)
+[![SPEC](https://img.shields.io/badge/SPECs-7_GREEN-purple.svg)](#)
 [![Security](https://img.shields.io/badge/Algorithm_Confusion_Attack-Defended-blue.svg)](#)
 
 > 한국 공공기관 경영평가 보고서 자동화 AI 플랫폼 — KEPCO E&C anchor
@@ -21,7 +21,7 @@ KEPCO E&C anchor 고객 대상 경영평가 자동화 플랫폼. HWP 문서 수�
 
 ## 프로젝트 상태
 
-**Walking Skeleton + Auth + Observability 완료** (Sprint 0-7 + OBS, 2026-05-15)
+**Walking Skeleton + Auth + Observability + ABAC 완료** (Sprint 0-7 + OBS + AUTH-003, 2026-05-18)
 
 **Python 파이프라인** (SPEC-AX-001 v0.1.2)
 - 192개 단위 테스트 통과 (83% 커버리지)
@@ -61,9 +61,16 @@ KEPCO E&C anchor 고객 대상 경영평가 자동화 플랫폼. HWP 문서 수�
 - Dependency Inversion (`RejectionObserver` interface) via `internal/auth/observer.go` — circular import 영구 해소
 - 24/24 AC GREEN, evaluator-active CONFIRM 89.0 (3 rounds), metrics 87.2% / observability 100%
 
+**Go 경량 ABAC** (SPEC-AX-AUTH-003 v0.1.0)
+- RBAC 위에 속성 기반 접근 제어 레이어 추가 (authn → authz → ABAC → handler)
+- OwnershipCondition (X-Resource-Owner), OrgUnitCondition (iroum-ax-org:<unit>), TimeWindowCondition (KST 09:00–18:00)
+- Admin(RoleAdmin) 전체 우회, 안전 무작동 (fail-safe no-op, REQ-ABAC-009)
+- 외부 의존성 0 (no OPA/Casbin), 망분리 정합, time.LoadLocation 금지
+- 30 AC 검증, abac.go 커버리지 98.5%, evaluator-active PASS 0.905
+
 **품질**
 - TRUST 5 PASS (모든 5가지 차원): Tested ✓ | Readable ✓ | Unified ✓ | Secured ✓ | Trackable ✓
-- 6개 SPEC 통합 완료 (AX-001 + CTRL-001 + AUTH-001 + AUTH-002 + SERVER-001 + OBS-001)
+- 7개 SPEC 통합 완료 (AX-001 + CTRL-001 + AUTH-001 + AUTH-002 + SERVER-001 + OBS-001 + AUTH-003)
 
 ---
 

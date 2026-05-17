@@ -5,7 +5,33 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)을 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/lang/ko/)을 준수합니다.
 
-## [Unreleased] - 2026-05-15
+## [Unreleased] - 2026-05-18
+
+### Added — SPEC-AX-AUTH-003 v0.1.0 (경량 ABAC — 속성 기반 접근 제어)
+
+- **ABACEvaluator** (`internal/auth/abac.go`): RBAC 위에 속성 기반 접근 제어 레이어; `authn → authz(RBAC) → ABAC → handler` 체인 (chain.go 무변경)
+- **OwnershipCondition**: X-Resource-Owner 헤더 기반 문서 소유권 검사; 비소유자 접근 시 `ABAC_CONDITION_DENIED` 403 반환
+- **OrgUnitCondition**: scope 토큰 `iroum-ax-org:<unit>` 기반 조직 단위 격리; 교차 조직 접근 차단 (비-Admin)
+- **TimeWindowCondition**: KST 09:00–18:00 업무 시간 제한; `time.FixedZone("KST",9*3600)` 강제 (time.LoadLocation 금지, 망분리 정합)
+- **Admin bypass**: `RoleAdmin` 감지 시 모든 ABAC 조건 우회 (REQ-ABAC-004)
+- **Fail-safe no-op**: 정책 미정의·조건 오류 시 ALLOW + 로그 (REQ-ABAC-009); 기본 정책 = 빈 집합
+- **ActionABACDenied**: `internal/audit/audit.go`에 Sprint 0 D5 상수 추가
+- **ABACMiddleware**: `cmd/server/server.go` REST mux 래핑 (BuildRESTChain 내부 무변경)
+- 30 AC 검증, abac.go 98.5% 커버리지, evaluator-active PASS 0.905 (Func 0.92/Sec 0.90/Craft 0.92/Cons 0.88)
+- plan-auditor PASS 0.93 (iter 2) — EARS 30 AC, 9 REQ (망분리/frozen/fail-safe)
+
+### Fixed — SPEC-AX-AUTH-003
+
+- AUTH-002 §6 Excl #4 (ABAC 속성 조건): 해소 (OwnershipCondition + OrgUnitCondition + TimeWindowCondition 구현)
+
+### Deferred — SPEC-AX-AUTH-003
+
+- `audit.Recorder.LogForbiddenEvent` 운영 구현 (AC-007-3 정상 경로 활성화) — Sprint 2
+- 자원별 ABAC 정책 추가 (`DefaultABACPolicies` 현재 빈 집합) — Sprint 2
+- OwnershipCondition X-Resource-Owner 헤더 기본 파서 배선 + 입력 bound — Sprint 2
+- gRPC endpoint ABAC 적용 — 별도 SPEC 검토
+
+---
 
 ### Added — SPEC-AX-OBS-001 v0.1.2 (Prometheus Metrics + OpenTelemetry Tracing Skeleton)
 - **Metrics Registry**: `prometheus/client_golang` 기반 레지스트리 싱글톤 (`internal/metrics/registry.go`)
