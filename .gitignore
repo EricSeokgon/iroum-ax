@@ -18,6 +18,7 @@ apps/control-plane/cmd/server/server
 *.so
 *.dylib
 cover.out
+coverage.out
 cover.html
 cpu.prof
 mem.prof
@@ -183,6 +184,10 @@ secret-*.*
 .moai/status_line.sh
 .moai/memory/
 .moai/worktrees/
+.moai/plans/
+.moai/state/
+!.moai/state/.gitkeep
+.moai/reports/session-*.md
 
 # ===========================================
 # Evolution Telemetry (local-only usage data)
