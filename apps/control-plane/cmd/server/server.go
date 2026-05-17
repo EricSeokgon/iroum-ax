@@ -232,9 +232,13 @@ func (s *Server) Run(ctx context.Context) error {
 	)
 
 	// 나머지 경로: auth chain으로 wrapping
-	// recorder=nil: audit.Recorder가 auth.auditRecorder 인터페이스를 아직 구현하지 않음 (S2 TODO)
+	// SPEC-AX-AUTH-003: ABACMiddleware로 REST mux를 래핑 (BuildRESTChain 안쪽).
+	// 실행 순서 authn → authz → abac → handler가 체인 캡슐화로 자연 보장 (chain.go 무변경).
+	// recorder=nil: audit.Recorder가 auth.auditRecorder 인터페이스를 아직 구현하지 않음 (S2 TODO);
+	// REQ-ABAC-007 recorder=nil이면 ABAC 감사 기록 skip. DefaultABACPolicies는 빈 집합 → 완전 no-op.
+	abacEvaluator := auth.NewABACEvaluator(auth.DefaultABACPolicies(), nil)
 	outerMux.Handle("/", auth.BuildRESTChain(
-		s.restHandler.Mux(),
+		auth.ABACMiddleware(abacEvaluator, s.cfg.AuthEnabled)(s.restHandler.Mux()),
 		s.tokenValidator,
 		nil,
 		s.cfg.AuthEnabled,

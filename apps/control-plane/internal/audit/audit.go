@@ -38,6 +38,9 @@ const (
 	// ActionAuthRefreshReuseDetected refresh token family reuse 공격 탐지
 	// REQ-AUTH-005-U1: OAuth 2.0 BCP — 이미 사용된 refresh token 재사용 시 family 전체 invalidation 후 기록
 	ActionAuthRefreshReuseDetected Action = "AUTH_REFRESH_REUSE_DETECTED"
+	// ActionABACDenied ABAC 속성 조건 위반으로 접근 거부
+	// SPEC-AX-AUTH-003 REQ-ABAC-007 D5: ABAC 거부 시 HTTP 403 + 거부 사유 기록
+	ActionABACDenied Action = "ABAC_CONDITION_DENIED"
 
 	// ActionServerStartup 서버 모든 리스너 바인딩 완료 후 기록
 	// REQ-SERVER-UBI-001-a: grpc_addr, rest_addr 기록
