@@ -1,7 +1,7 @@
 ---
 id: SPEC-AX-EVID-001
 version: 0.1.2
-status: draft
+status: completed
 created: 2026-05-18
 updated: 2026-05-18
 author: ircp
@@ -234,3 +234,16 @@ Ubiquitous 요구사항은 SPEC-AX-001 / SPEC-AX-CTRL-001의 canonical `REQ-UBI-
 - 회귀: 기존 WorkflowStore 특성화 테스트가 evidence 와이어링 후에도 GREEN 유지
 
 상세 Given/When/Then 시나리오는 `acceptance.md`를 참조한다.
+
+---
+
+## Implementation Notes
+
+- **구현 완료**: 2026-05-18, 브랜치 `feature/SPEC-AX-EVID-001-evidence`, 커밋 `99e12ef`
+- **개발 방법론**: TDD (RED-GREEN-REFACTOR) + Targeted Fix Cycle
+- **품질 평가**: evaluator-active Phase 2.8a 재평가 PASS 0.930
+- **커버리지**: evidence-core 커버리지 91.4%, 신규 테스트 다수 추가
+- **database_blob 전략 확정**: `file_content BYTEA` 컬럼에 바이너리 직접 저장; `dbBlobStore`는 논리 location `db://evidences/<uuid>` 만 기록 (외부 의존 0건 — REQ-EVID-UBI-001 데이터 주권 준수)
+- **GAP-03/04 해소**: `internal/errors/errors.go`에 `ErrEvidenceNotFound`, `ErrEvidenceImmutable` 센티널 추가
+- **테스트 파일 구조**: 테스트를 파일 단위로 세분화 (handler/store/audit 각 분리)
+- **기지 예외**: `TestE2E_GRPC_Authz_ViewerForbidden_Create` 테스트 — SPEC-AX-AUTH-002/SERVER-001 범위의 기존 pre-existing 실패이며 본 SPEC 범위 밖 (AUTH-002 §6 Exclusion에 명시)

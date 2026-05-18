@@ -118,6 +118,7 @@ logs/
 # Backups
 # ===========================================
 .moai-backups/
+.moai/backups/
 *.backup/
 *-backup/
 *_backup_*/

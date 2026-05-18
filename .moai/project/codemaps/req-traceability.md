@@ -254,23 +254,79 @@ REQ-UBI + REQ-AX-001~005 (Python) + REQ-CTRL-001~005 (Go) + REQ-AUTH-001~005 (Go
 
 ---
 
+## SPEC-AX-EVID-001: 증빙 자료 수집/관리 (Walking Skeleton)
+
+### REQ-EVID-001: 증빙 데이터 모델 & Store 계층
+
+| REQ ID | 설명 | 구현 위치 | 테스트 | 상태 |
+|--------|------|---------|--------|------|
+| REQ-EVID-001 | 증빙 데이터 모델 & Store 계층 | `internal/store/evidence.go`, `internal/store/pg_store.go` | `evidence_store_test.go`, `evidence_helpers_test.go` | PASS |
+
+**구현 세부**: `evidences` 테이블 (단일 테이블, `file_content BYTEA` 컬럼), `EvidenceTx.InsertEvidence`, `BeginEvidenceTx(pool)`, `GetEvidenceByID`, `ListEvidencesByEvalItem`
+
+### REQ-EVID-002: 버전 관리/체이닝
+
+| REQ ID | 설명 | 구현 위치 | 테스트 | 상태 |
+|--------|------|---------|--------|------|
+| REQ-EVID-002 | 버전 관리/체이닝 | `internal/store/evidence.go` (`GetLatestVersionByEvalItem`, `MarkSuperseded`) | `evidence_version_test.go`, `evidence_concurrent_test.go`, `evidence_rollback_test.go` | PASS |
+
+**구현 세부**: `previous_version_id UUID REFERENCES evidences(id)` 자기 참조, `SELECT FOR UPDATE` 직렬화, `status=SUPERSEDED` 불변성, `ErrEvidenceNotFound` / `ErrEvidenceImmutable` sentinel (`internal/errors/errors.go`)
+
+### REQ-EVID-003: 감사 연계 Recorder 확장
+
+| REQ ID | 설명 | 구현 위치 | 테스트 | 상태 |
+|--------|------|---------|--------|------|
+| REQ-EVID-003 | 감사 연계 Recorder 확장 | `internal/audit/recorder.go`, `internal/audit/clock.go` | `internal/audit/recorder_evidence_test.go` | PASS |
+
+**구현 세부**: `RecordEvidenceCreated(ctx, tx, evidenceID, evalItemID, fileHashSHA256, version, userID)`, `RecordEvidenceVersioned(ctx, tx, evidenceID, evalItemID, fileHashSHA256, version, previousVersionID, userID)`, `Clock` 인터페이스 + `systemClock` (시간 주입), `DefaultUserID = "cli-anonymous"`
+
+### REQ-EVID-004: 저장 전략 추상화
+
+| REQ ID | 설명 | 구현 위치 | 테스트 | 상태 |
+|--------|------|---------|--------|------|
+| REQ-EVID-004 | 저장 전략 추상화 | `internal/storage/storage.go` | `evidence_storage_strategy_test.go` | PASS |
+
+**구현 세부**: `EvidenceBlobStore` 인터페이스 (`Put(ctx, key, io.Reader) (string, error)`, `Get(ctx, location) (io.ReadCloser, error)`), `dbBlobStore` 구현체 (`Put` → `"db://evidences/" + key` 반환, bytes는 `InsertEvidence` TX에서 처리), `NewDBBlobStore()`
+
+### REQ-EVID-UBI-001~004: 교차 요구사항
+
+| REQ ID | 설명 | 구현 위치 | 테스트 | 상태 |
+|--------|------|---------|--------|------|
+| REQ-EVID-UBI-001 | 데이터 주권 (외부 SaaS SDK 미사용) | `internal/storage/storage.go`, `go.mod` (외부 스토리지 SDK 없음) | `evidence_sovereignty_test.go` | PASS |
+| REQ-EVID-UBI-002 | 감사 가능성 (모든 생성/버전 이벤트 audit 기록) | `cmd/server/evidence_handlers.go` (`persistEvidenceTx`), `internal/audit/recorder.go` | `evidence_audit_test.go` | PASS |
+| REQ-EVID-UBI-003 | cli-anonymous 기본값 (인증 미구성 시) | `internal/audit/recorder.go` (`DefaultUserID`), `internal/config/config.go` | `recorder_evidence_test.go` | PASS |
+| REQ-EVID-UBI-004 | 버전 불변 (successor 존재 시 SUPERSEDED만 허용) | `internal/store/evidence.go` (`MarkSuperseded`), `internal/errors/errors.go` (`ErrEvidenceImmutable`) | `evidence_version_test.go`, `evidence_errorpaths_test.go` | PASS |
+
+### GAP 해소 현황 (GAP-01, GAP-03, GAP-04)
+
+| GAP ID | 설명 | 해소 방법 | 상태 |
+|--------|------|---------|------|
+| GAP-01 | 증빙 생성 API 부재 | `POST /api/v1/evidences` 단일 라우트 (`cmd/server/evidence_handlers.go`) — 생성과 버전 모두 `handleCreateEvidence` 단일 핸들러 처리 | RESOLVED |
+| GAP-03 | `ErrEvidenceNotFound` sentinel 부재 | `internal/errors/errors.go` 추가 | RESOLVED |
+| GAP-04 | `ErrEvidenceImmutable` sentinel 부재 | `internal/errors/errors.go` 추가 | RESOLVED |
+
+**테스트 합계**: evidence 관련 Go 테스트 신규 (store 10개 파일 + handler 5개 파일 + audit 1개 파일), coverage 91.4%
+
+---
+
 ## 통합 요구사항 추적성 요약
 
 | REQ | AC 수 | 테스트 수 | 구현 모듈 수 | 상태 |
 |-----|-----|---------|-----------| ------|
-| **REQ-UBI** | 4 | 15 | 5 (설정, 감지, 검증, 로거) | ✅ 완료 (Sprint 1 CTRL) |
-| **REQ-AX-001** | 5 | 31 | 5 (파서 3 + 추출 2) | ✅ 완료 (Sprint 2 AX) |
-| **REQ-AX-002** | 5 | 35 | 4 (매핑, 임베딩, 저장, 검색) | ✅ 완료 (Sprint 3 AX) |
-| **REQ-AX-003** | 5 | 29 | 3 (학습, 예측, 시뮬) | ✅ 완료 (Sprint 4 AX) |
-| **REQ-AX-004** | 5 | 38 | 4 (클라이언트, 드래프터, 빌더, 스타일) | ✅ 완료 (Sprint 5 AX) |
-| **REQ-AX-005** | 5 | 21 | 3 (갭, 제안, 우선순위) | ✅ 완료 (Sprint 6 AX) |
-| **REQ-CTRL-001~005** | - | 95 | 12 (server, workflow, store, audit, scheduler) | ✅ 완료 (Sprint 7 CTRL) |
-| **REQ-AUTH-001~005 + E2E** | 24 | 105 | 12 (validator, oidc, cache, middleware, rbac, refresh) | ✅ 완료 (Sprint 7 AUTH) |
-| **합계** | **53** | **380+** | **43** | ✅ **100% 완료** |
+| **REQ-UBI** | 4 | 15 | 5 (설정, 감지, 검증, 로거) | 완료 (Sprint 1 CTRL) |
+| **REQ-AX-001** | 5 | 31 | 5 (파서 3 + 추출 2) | 완료 (Sprint 2 AX) |
+| **REQ-AX-002** | 5 | 35 | 4 (매핑, 임베딩, 저장, 검색) | 완료 (Sprint 3 AX) |
+| **REQ-AX-003** | 5 | 29 | 3 (학습, 예측, 시뮬) | 완료 (Sprint 4 AX) |
+| **REQ-AX-004** | 5 | 38 | 4 (클라이언트, 드래프터, 빌더, 스타일) | 완료 (Sprint 5 AX) |
+| **REQ-AX-005** | 5 | 21 | 3 (갭, 제안, 우선순위) | 완료 (Sprint 6 AX) |
+| **REQ-CTRL-001~005** | - | 95 | 12 (server, workflow, store, audit, scheduler) | 완료 (Sprint 7 CTRL) |
+| **REQ-AUTH-001~005 + E2E** | 24 | 105 | 12 (validator, oidc, cache, middleware, rbac, refresh) | 완료 (Sprint 7 AUTH) |
+| **REQ-EVID-001~004 + UBI-001~004** | 8 | 91.4% cov | 6 (store, pg_store, storage, recorder, clock, evidence_handlers) | 완료 (SPEC-AX-EVID-001) |
+| **합계** | **61+** | **480+** | **49+** | 100% 완료 |
 
 ---
 
-**최종 업데이트**: 2026-05-15 (SPEC-AX-AUTH-001 v0.1.1 Sync 완료)  
-**전체 AC**: 53개 모두 구현 · 테스트됨  
-**전체 테스트**: 380+ passing (Python 192 + Go 156 + 11 integration + 21 E2E)  
-**커버리지**: Python 83% | Go auth/ 70% | TRUST 5: 모두 PASS
+**최종 업데이트**: 2026-05-18 (SPEC-AX-EVID-001 v0.1.0 Sync 완료)  
+**전체 AC**: 61+ 구현 · 테스트됨  
+**전체 테스트**: 480+ passing (Python 192 + Go 247+ + 11 integration + 21 E2E)  
+**커버리지**: Python 83% | Go evidence/ 91.4% | Go auth/ 70% | TRUST 5: 모두 PASS

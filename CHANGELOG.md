@@ -7,6 +7,30 @@
 
 ## [Unreleased] - 2026-05-18
 
+### Added — SPEC-AX-EVID-001 v0.1.0 (경영평가 증빙 자료 수집/관리)
+
+- **증빙 데이터 모델** (`evidences` 테이블, `.moai/db/schema/migrations/0002_evidence_tables.sql`): `id UUID PK`, `evaluation_item_id VARCHAR(64)` (FK 제약 없음), `version INT`, `previous_version_id UUID` 자기 참조, `file_content BYTEA` (database_blob 전략 시 바이너리 저장 컬럼), `storage_location VARCHAR(255)`, `storage_strategy VARCHAR(32)`, `file_hash_sha256`, `created_by DEFAULT 'cli-anonymous'` 등. 인덱스 2개 (`evidences_eval_item_version_idx`, `evidences_created_at_idx`).
+- **단일 증빙 엔드포인트** (`POST /api/v1/evidences`, `cmd/server/evidence_handlers.go`): 증빙 생성(version=1)과 버전 업(version+1)을 단일 핸들러 `handleCreateEvidence`로 통합. multipart 수신 → Content-Type/Content-Length 사전 검증 → SHA-256 단일 패스 스트리밍 → pre-TX 입력 검증 → `BeginEvidenceTx` → `SELECT FOR UPDATE` 버전 결정 → `InsertEvidence(file_content)` → 감사 기록 → Commit → 201 `{evidence_id, version}` 반환.
+- **저장 전략 추상화** (`internal/storage/storage.go`): `EvidenceBlobStore` 인터페이스 + `dbBlobStore` 구현체. database_blob 전략에서 blob bytes는 이 인터페이스를 통과하지 않으며 `EvidenceTx.InsertEvidence(file_content)`로 동일 pgx TX에 저장; `dbBlobStore.Put`은 논리 위치 문자열 `db://evidences/<uuid>` 만 반환 (외부 SaaS SDK 의존 0건 — REQ-EVID-UBI-001 망분리 정합).
+- **감사 Recorder 확장** (`internal/audit/recorder.go`): `RecordEvidenceCreated` / `RecordEvidenceVersioned` 메서드 추가 — 각각 `EVIDENCE_CREATED`, `EVIDENCE_VERSIONED` 액션으로 동일 AuditTx 내 audit_logs 원자 기록 (REQ-EVID-UBI-002).
+- **Clock 주입 추상화** (`internal/audit/clock.go`): `Clock` 인터페이스 + `systemClock` 기본 구현 — 증빙 감사 시각 검증을 위한 테스트 친화 구조.
+- **환경 변수 3종** (`internal/config/config.go`): `EVIDENCE_STORAGE_STRATEGY` (기본 `database_blob`), `EVIDENCE_MAX_FILE_BYTES` (기본 50 MiB), `EVIDENCE_DUPLICATE_SIGNAL_ENABLED` (기본 `false`). `Validate()` / `LoadConfig()`로 fail-fast 열거 검증.
+- **에러 센티널** (`internal/errors/errors.go`): `ErrEvidenceNotFound`, `ErrEvidenceImmutable` 추가 (GAP-03/04 해소).
+- **TDD 기반 구현**: evidence-core 커버리지 91.4%, 신규 테스트 다수 (store/audit/handler 각 파일 분리).
+- evaluator-active Phase 2.8a 재평가 PASS 0.930
+
+### Fixed — SPEC-AX-EVID-001
+
+- GAP-01 (`POST /api/v1/evidences` 단일 라우트로 생성+버전 통합): 해소
+- GAP-03/04 (`ErrEvidenceNotFound`, `ErrEvidenceImmutable` 센티널): 해소
+- database_blob 전략 RESOLVED (plan.md §6): 외부 저장소 의존 없는 pgx TX 내 BYTEA 직접 저장으로 확정
+
+### Known — SPEC-AX-EVID-001 범위 외 기지 항목
+
+- `TestE2E_GRPC_Authz_ViewerForbidden_Create`: SPEC-AX-AUTH-002/SERVER-001 범위의 pre-existing 실패, 본 SPEC 범위 밖
+
+---
+
 ### Added — SPEC-AX-AUTH-003 v0.1.0 (경량 ABAC — 속성 기반 접근 제어)
 
 - **ABACEvaluator** (`internal/auth/abac.go`): RBAC 위에 속성 기반 접근 제어 레이어; `authn → authz(RBAC) → ABAC → handler` 체인 (chain.go 무변경)

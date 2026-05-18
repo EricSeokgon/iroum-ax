@@ -191,7 +191,62 @@ type Event struct {
 
 ---
 
-### 6. 설정 및 타입 (`internal/config/`, `internal/types/`, `internal/errors/`, `internal/log/`)
+### 6. 증빙 관리 (`internal/store/evidence.go`, `internal/storage/`, `internal/audit/recorder.go`, `cmd/server/evidence_handlers.go`)
+
+> SPEC-AX-EVID-001 v0.1.0 — 경영평가 증빙 자료 수집/관리
+
+**evidence.go** (`internal/store/evidence.go` — EvidenceTx 구현)
+- `PgEvidenceTx` struct: pgx TX 래퍼, `EvidenceTx` 인터페이스 구현
+- `BeginEvidenceTx(ctx) (EvidenceTx, error)`: `PgWorkflowStore.pool`에서 새 pgx TX 시작 (신규 pool 생성 금지 — 단일 pool 재사용)
+- `InsertEvidence(ctx, evalItemID, fileName, contentType, fileSize, fileHash, storageStrategy, storageLocation, metadata, fileContent BYTEA, prevVersionID)` → `(uuid.UUID, error)`
+- `GetEvidenceByID(ctx, id)` → `(*Evidence, error)` — not found 시 `ErrEvidenceNotFound` 래핑
+- `GetLatestVersionByEvalItem(ctx, evalItemID)` → `(*Evidence, error)` — `SELECT ... FOR UPDATE` 직렬화
+- `ListEvidenceByEvalItem(ctx, evalItemID)` → `([]*Evidence, error)`
+- `MarkSuperseded(ctx, id)` → `error` — 직전 버전 `status=SUPERSEDED` 전이 (본문/파일 메타 불변)
+- `InsertAuditLog`, `Commit`, `Rollback`
+- @MX:ANCHOR: `BeginEvidenceTx` (핸들러 + 통합 테스트 + 감사 검증 3곳 이상 호출)
+
+**storage.go** (`internal/storage/storage.go` — 저장 전략 추상화)
+- `EvidenceBlobStore` interface: `Put(ctx, key, io.Reader) (string, error)`, `Get(ctx, location) (io.ReadCloser, error)`
+- `dbBlobStore` struct: database_blob 전략 구현체 — blob bytes는 이 인터페이스를 통과하지 않음; `Put`은 논리 위치 `db://evidences/<key>` 만 반환 (실제 바이너리는 `InsertEvidence(file_content)` 경유)
+- `NewDBBlobStore() EvidenceBlobStore`: 외부 의존 0 (자격증명/네트워크 endpoint 없음 — REQ-EVID-UBI-001)
+- @MX:NOTE: 저장 전략 database_blob 확정 — 추상화 유지로 filesystem/minio 전환 대비 (REQ-EVID-004)
+
+**recorder.go** (`internal/audit/recorder.go` — 증빙 감사 메서드 추가)
+- `RecordEvidenceCreated(ctx, tx, evidenceID, evalItemID, fileHashSHA256, version, userID)`: `EVIDENCE_CREATED` 액션 audit_logs INSERT — details `{evaluation_item_id, version, file_hash_sha256}`
+- `RecordEvidenceVersioned(ctx, tx, evidenceID, evalItemID, fileHashSHA256, version, previousVersionID, userID)`: `EVIDENCE_VERSIONED` 액션 — details에 `previous_version_id` 포함
+- 두 메서드 모두 `r.nowUTC()` (Clock 주입) 사용, `r.resolveUserID()` 로 cli-anonymous 기본값 적용
+- @MX:ANCHOR: `RecordEvidenceCreated`, `RecordEvidenceVersioned` (핸들러+통합테스트+감사 검증 3곳 이상)
+
+**clock.go** (`internal/audit/clock.go` — 시각 주입 추상화)
+- `Clock` interface: `NowUTC() time.Time`
+- `systemClock` struct: `time.Now().UTC()` 반환 (기존 동작과 byte-identical)
+- `defaultClock Clock = systemClock{}`: Recorder가 명시적 Clock 미주입 시 사용
+- `WithClock(c Clock) RecorderOption`: 테스트에서 고정 시각 주입 (R-EVID-007)
+
+**evidence_handlers.go** (`cmd/server/evidence_handlers.go` — 단일 증빙 핸들러)
+- `EvidenceHandler` struct: `store.EvidenceStore`, `evidenceRecorder`, `storage.EvidenceBlobStore`, `*zap.Logger`, `maxFileBytes int64`, `dupSignal bool`
+- `NewEvidenceHandler(st, rec, blob, logger, maxFileBytes, dupSignal)`: 핸들러 생성
+- **단일 라우트**: `Routes() http.Handler` → `mux.HandleFunc("POST /api/v1/evidences", h.handleCreateEvidence)` (GAP-01 — `/evidences/{id}/versions` 별도 라우트 없음)
+- **단일 핸들러** `handleCreateEvidence`: Content-Type 검증(SEC-01) → Content-Length 사전 거부(SEC-02.1) → multipart SHA-256 단일 패스 스트리밍(F1, SEC-02.2/3) → pre-TX 입력 검증(SEC-05) → `BeginEvidenceTx` → defer Rollback(SEC-07) → `GetLatestVersionByEvalItem` 버전 결정 → `InsertEvidence(file_content)` → `MarkSuperseded` → `RecordEvidence{Created|Versioned}` → Commit → 201 `{evidence_id, version}`
+- `parseAndHashMultipart(r, maxBytes)`: `io.MultiWriter(&buf, sha256.New())` + `io.LimitReader` 단일 패스
+- `resolveVersion(ctx, tx, evalItemID, fileHash)`: SELECT FOR UPDATE 직렬화, dupSignal 처리
+- @MX:ANCHOR: `EvidenceHandler` (핸들러 테스트 + 서버 마운트 + 통합 테스트 3곳 이상)
+- @MX:WARN: `BeginEvidenceTx` 이후 Commit 전 panic/early-return 시 orphan 증빙 행 누출 — defer Rollback이 즉시 등록되어야 함 (SEC-07)
+
+**config.go 추가 항목** (`internal/config/config.go`)
+- `EvidenceStorageStrategy string` — env `EVIDENCE_STORAGE_STRATEGY`, 기본 `database_blob`
+- `EvidenceMaxFileBytes int64` — env `EVIDENCE_MAX_FILE_BYTES`, 기본 52428800 (50 MiB)
+- `EvidenceDuplicateSignalEnabled bool` — env `EVIDENCE_DUPLICATE_SIGNAL_ENABLED`, 기본 `false`
+- `Validate()` / `LoadConfig()`: storage strategy 열거 검증 fail-fast
+
+**errors.go 추가 항목** (`internal/errors/errors.go`)
+- `ErrEvidenceNotFound`: `GetEvidenceByID` pgx.ErrNoRows 래핑 (GAP-03)
+- `ErrEvidenceImmutable`: successor 존재 시 본문 컬럼 변경 시도 차단 (GAP-04, REQ-EVID-UBI-004)
+
+---
+
+### 7. 설정 및 타입 (`internal/config/`, `internal/types/`, `internal/errors/`, `internal/log/`)
 
 **config.go** (환경변수 파서)
 ```
