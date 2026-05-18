@@ -58,11 +58,33 @@ const (
 	// ActionEvidenceVersioned 기존 증빙 재업로드(version+1) 시 기록
 	// SPEC-AX-EVID-001 REQ-EVID-003-E1: 버전 이벤트와 동일 TX에 audit_logs 1건
 	ActionEvidenceVersioned Action = "EVIDENCE_VERSIONED"
+
+	// ActionEvalItemCreated 평가항목(루트/자식) 생성 시 기록
+	// SPEC-AX-EVAL-ITEM-001 REQ-EVALITEM-003-E1: 항목 생성과 동일 TX에 audit_logs 1건
+	ActionEvalItemCreated Action = "EVAL_ITEM_CREATED"
+	// ActionEvalItemUpdated 평가항목 속성/상태 변경 시 기록
+	// SPEC-AX-EVAL-ITEM-001 REQ-EVALITEM-003-E1 / REQ-EVALITEM-004-O1: 수정과 동일 TX에 audit_logs 1건
+	ActionEvalItemUpdated Action = "EVAL_ITEM_UPDATED"
 )
+
+// EvalItemAuditNamespace 평가항목 감사 resource_id surrogate 생성용 고정 UUID namespace.
+// SPEC-AX-EVAL-ITEM-001 §6.6 AUD-1 (Human Gate Decision Point 2 확정):
+// evaluation_items.id는 VARCHAR(64) 계층코드라 uuid.UUID 컬럼(audit_logs.resource_id NOT NULL)에
+// 직접 들어갈 수 없다. RecordEvalItem*는 hierarchy_code를 이 고정 namespace 기반
+// 결정적 UUIDv5(uuid.NewSHA1)로 변환해 resource_id에 저장한다.
+//
+// [HARD] SEC-05 / TH-12: 반드시 컴파일 타임 고정 리터럴이어야 한다. uuid.New() 런타임 생성·
+// 환경변수·설정 파일 유래 금지 — namespace가 가변이면 동일 hierarchy_code의 과거/신규
+// audit 행 상관관계가 단절되어 감사 추적성이 붕괴한다.
+//
+// @MX:ANCHOR: [AUTO] RecordEvalItemCreated/RecordEvalItemUpdated가 공유하는 결정적 surrogate namespace
+// @MX:REASON: AUD-1 불변식 — 이 값이 바뀌면 모든 평가항목 audit resource_id 결정성이 깨진다 (SEC-05, TH-12)
+var EvalItemAuditNamespace = uuid.MustParse("a7f3c2e1-9b4d-5e6f-8a0b-1c2d3e4f5a6b")
 
 // Event 감사 로그 이벤트 엔티티
 // 필드 순서: 슬라이스(24바이트) → 시간(24바이트) → UUID(16바이트) → 문자열들
-// @MX:TODO - Sprint 1에서 PostgreSQL audit_logs 테이블에 INSERT 구현
+// @MX:NOTE: [AUTO] audit_logs INSERT는 store-layer Tx에 구현됨 (PgWorkflowTx/PgEvidenceTx/
+// PgEvalItemTx.InsertAuditLog) — 항목 쓰기와 동일 pgx TX에 atomic 1건 (CTRL-001/EVID-001 운영 중)
 type Event struct {
 	Timestamp    time.Time `json:"timestamp"`
 	Action       Action    `json:"action"`

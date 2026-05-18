@@ -43,8 +43,8 @@ TDD: RED audit row 부재 검증 → GREEN RecordEvalItemCreated/Updated 동일 
 - 호출자가 신규 항목 `id="AX-SAFETY-ORG-01"`을 생성하고, 이어서 동일 항목의 `display_name`을 수정한다 (각각 별도 `EvalItemTx`)
 
 **Then**:
-- 생성 후 `audit_logs`에 `action='EVAL_ITEM_CREATED'`, `resource_type='evaluation_item'`, `resource_id='AX-SAFETY-ORG-01'` row 정확히 1개
-- 수정 후 `audit_logs`에 `action='EVAL_ITEM_UPDATED'` row 정확히 1개 (같은 resource_id)
+- 생성 후 `audit_logs`에 `action='EVAL_ITEM_CREATED'`, `resource_type='evaluation_item'` row 정확히 1개; `resource_id`는 AUD-1 결정적 UUIDv5 surrogate(`uuid.NewSHA1(EvalItemAuditNamespace, hierarchy_code)`)이며 실 항목 식별은 `details->>'eval_item_id' = 'AX-SAFETY-ORG-01'`로 검증 (원시 계층코드는 `resource_id`에 저장 불가 — `uuid.UUID NOT NULL`, spec.md §3.4 AUD-1)
+- 수정 후 `audit_logs`에 `action='EVAL_ITEM_UPDATED'` row 정확히 1개 (동일 hierarchy_code → 동일 `resource_id` UUIDv5, `details->>'eval_item_id'` 동일)
 - 각 이벤트마다 `evaluation_items` 변경 + `audit_logs` row 1건이 동일 트랜잭션 커밋 (한쪽만 존재하는 상태 없음)
 
 ### AC-EVALITEM-UBI-003 (cli-anonymous Default)
@@ -257,35 +257,59 @@ TDD: RED 다단계 계층 조회 단절 → GREEN level별 자식 조회.
 
 ## §3. REQ-EVALITEM-003 감사 연계 — Acceptance
 
-### AC-EVALITEM-003-1 (RecordEvalItemCreated Audit Row)
+### AC-EVALITEM-003-1 (RecordEvalItemCreated Audit Row — AUD-1 deterministic UUIDv5 resource_id)
 
-TDD: RED RecordEvalItemCreated 미구현 → GREEN recorder.go 메서드 추가.
+REQ 대응: REQ-EVALITEM-003-E1. AUD-1 전략(plan.md §6.6, spec.md §3.4): `resource_id`는 원시 계층코드가 아닌 결정적 UUIDv5, 실 식별자는 `DetailsJSON`.
+TDD: RED RecordEvalItemCreated 미구현 + (잘못) `resource_id`에 원시 계층코드 단언 → GREEN recorder.go 메서드 + `uuid.NewSHA1` surrogate.
+주의 (Decision 3 정정, v0.1.3): 이전 v0.1.2까지 `ResourceID="AX-SAFETY-ORG-01"`(원시 계층코드) 단언은 `audit_logs.resource_id`가 `uuid.UUID NOT NULL`(initial.sql:119)이라 올바른 구현에서도 false RED → AUD-1 기준 재작성.
 
 **Given**:
 - `audit_logs` clean state, Recorder(`authEnabled=false`)
+- 고정 namespace 상수 `EvalItemAuditNamespace`가 `internal/audit/audit.go`에 정의됨
+- `hierarchyCode="AX.SAFETY.ORG.01"`, `itemID="AX-SAFETY-ORG-01"`
 
 **When**:
-- 평가항목 생성 TX가 `Recorder.RecordEvalItemCreated(ctx, tx, itemID="AX-SAFETY-ORG-01", hierarchyCode, parentID, level, userID="")` 호출
+- 평가항목 생성 TX가 `Recorder.RecordEvalItemCreated(ctx, tx, itemID="AX-SAFETY-ORG-01", hierarchyCode="AX.SAFETY.ORG.01", parentID, level, userID="")` 호출
 
 **Then**:
-- `audit.Event`: `Action="EVAL_ITEM_CREATED"`, `ResourceType="evaluation_item"`, `ResourceID="AX-SAFETY-ORG-01"`, `UserID="cli-anonymous"`(resolveUserID), `Timestamp` NOT NULL
-- `DetailsJSON`에 `{hierarchy_code, parent_id, level}` 포함
+- `audit.Event`: `Action="EVAL_ITEM_CREATED"`, `ResourceType="evaluation_item"`, `UserID="cli-anonymous"`(resolveUserID), `Timestamp` NOT NULL
+- `Event.ResourceID` (= `audit_logs.resource_id`, 타입 `uuid.UUID`)가 **원시 계층코드가 아니라** `uuid.NewSHA1(EvalItemAuditNamespace, []byte("AX.SAFETY.ORG.01"))`와 byte-identical (결정적 UUIDv5 surrogate — `resource_id != uuid.Nil`, `resource_id`가 문자열 "AX-SAFETY-ORG-01"이 아님을 검증)
+- 실제 계층 식별자는 `DetailsJSON`으로 검증: `details->>'eval_item_id' = 'AX-SAFETY-ORG-01'` AND `details->>'hierarchy_code' = 'AX.SAFETY.ORG.01'` (`parent_id`/`level`도 포함)
 - 동일 `AuditTx`로 INSERT (store→audit 순환 의존 없음 — `audit` 패키지가 `store` 미import)
 
-### AC-EVALITEM-003-2 (RecordEvalItemUpdated Audit Row)
+### AC-EVALITEM-003-2 (RecordEvalItemUpdated Audit Row — AUD-1)
 
-TDD: RED RecordEvalItemUpdated 미구현 → GREEN 메서드 추가.
+REQ 대응: REQ-EVALITEM-003-E1 (update 이벤트). AUD-1 동일 적용.
+TDD: RED RecordEvalItemUpdated 미구현 → GREEN 메서드 + UUIDv5 surrogate.
 
 **Given**:
-- 항목 `id="AX-SAFETY-ORG-01"`이 존재, 수정 TX 진행 중
+- 항목 `id="AX-SAFETY-ORG-01"`, `hierarchyCode="AX.SAFETY.ORG.01"`이 존재, 수정 TX 진행 중
 
 **When**:
-- `Recorder.RecordEvalItemUpdated(ctx, tx, itemID="AX-SAFETY-ORG-01", hierarchyCode, parentID, level, userID="")` 호출 (display_name 수정 이벤트)
+- `Recorder.RecordEvalItemUpdated(ctx, tx, itemID="AX-SAFETY-ORG-01", hierarchyCode="AX.SAFETY.ORG.01", parentID, level, userID="")` 호출 (display_name 수정 이벤트)
 
 **Then**:
-- `Action="EVAL_ITEM_UPDATED"`, `ResourceID="AX-SAFETY-ORG-01"`
-- `DetailsJSON`에 `{hierarchy_code, parent_id, level}` 포함
+- `Action="EVAL_ITEM_UPDATED"`
+- `Event.ResourceID` = `uuid.NewSHA1(EvalItemAuditNamespace, []byte("AX.SAFETY.ORG.01"))` (결정적 UUIDv5, 원시 계층코드 아님), `resource_id != uuid.Nil`
+- 실 식별자는 `DetailsJSON`: `details->>'eval_item_id' = 'AX-SAFETY-ORG-01'` AND `details->>'hierarchy_code' = 'AX.SAFETY.ORG.01'`
 - `user_id="cli-anonymous"`
+
+### AC-EVALITEM-003-E2-1 (resource_id 결정성 — 동일 hierarchy_code → 동일 UUID)
+
+REQ 대응: REQ-EVALITEM-003-E2 (deterministic UUIDv5 surrogate 재현성 — v0.1.3 Decision 3 신규 AC).
+TDD: RED 비결정적/랜덤 resource_id (잘못, audit 추적성 붕괴) → GREEN `uuid.NewSHA1(고정 namespace, hierarchyCode)` 결정적 산출.
+
+**Given**:
+- 고정 상수 `EvalItemAuditNamespace` (`internal/audit/audit.go`)
+- 동일 `hierarchyCode="AX.SAFETY.ORG.01"`로 2회 audit 기록 (예: 항목 생성 후 동일 항목 update — 같은 hierarchy_code)
+
+**When**:
+- `RecordEvalItemCreated`(1회차)와 `RecordEvalItemUpdated`(2회차)가 동일 `hierarchyCode`로 `Event.ResourceID`를 파생한다
+
+**Then**:
+- 두 호출의 `Event.ResourceID`가 **byte-identical** (`uuid.NewSHA1`은 고정 namespace + 동일 입력 → 동일 UUID — 결정적·재현 가능)
+- 산출 UUID는 `uuid.Nil`이 아니며 RFC 4122 version 5 (SHA-1 name-based)
+- 서로 다른 `hierarchyCode`(예: `"AX.SAFETY.ORG.02"`)는 다른 `ResourceID` 산출 (충돌 없음 — surrogate가 hierarchy_code별로 안정적으로 audit row를 그룹화 가능, R-EVALITEM-007 완화 검증)
 
 ### AC-EVALITEM-003-3 (Edge — Audit Fail → 항목+감사 양방향 Rollback 원자성)
 
@@ -394,7 +418,7 @@ SPEC-AX-CTRL-001 §4 / SPEC-AX-EVID-001 §5 표 패턴. 한국 공공 6제약 �
 |------|----------|---------|-----------|
 | 데이터 주권 | 생성/조회/수정/검증 외부 호출 0건, 외부 SDK 미import | AC-EVALITEM-UBI-001 | 네트워크 spy + 정적 import 검사 |
 | 언어 (한글 display_name) | `display_name`이 한글 평가항목명 수용 (VARCHAR(256) UTF-8) | AC-EVALITEM-001-1, AC-EVALITEM-004-3 | 한글 문자열 round-trip |
-| 감사 가능성 | 모든 create/update → 동일 TX audit_logs 1건, 누락 0 | AC-EVALITEM-UBI-002, AC-EVALITEM-003-1/2 | testcontainers row count |
+| 감사 가능성 | 모든 create/update → 동일 TX audit_logs 1건, 누락 0; resource_id=AUD-1 결정적 UUIDv5(원시 계층코드 아님), 실 식별자 DetailsJSON | AC-EVALITEM-UBI-002, AC-EVALITEM-003-1/2, AC-EVALITEM-003-E2-1 | testcontainers row count + UUIDv5 결정성 |
 | cli-anonymous 기본값 | AuthN disabled 시 created_by/user_id='cli-anonymous' literal | AC-EVALITEM-UBI-003 | 컬럼 byte 비교 |
 | 계층 무결성 | 자식 보유 항목 parent_id/level 불변, FK RESTRICT, hierarchy_code UNIQUE | AC-EVALITEM-UBI-004, AC-EVALITEM-002-2/3, AC-EVALITEM-004-1 | mutation guard + 제약 위반 검증 |
 | 시간 제약 | 항목 생성/계층 조회 p99 < 50ms (단일 노드) | AC-EVALITEM-001-1, AC-EVALITEM-002-1 | 10회 반복 latency 측정 |
@@ -422,6 +446,8 @@ plan.md §7 R-EVALITEM-001~006 risk register 매핑.
 | 잎 노드 비-계층 속성 수정 + audit | AC-EVALITEM-004-3 | (정상 lifecycle) |
 | evidences.evaluation_item_id FK 부재 유지 (out-of-scope 경계) | AC-EVALITEM-BOUNDARY-1 | R-EVALITEM-002 |
 | store→audit 순환 의존 회피 (로컬 AuditTx) | AC-EVALITEM-003-1 | (아키텍처 불변식) |
+| audit resource_id 타입 불일치 → AUD-1 결정적 UUIDv5 surrogate (원시 계층코드 아님, 실 식별자 DetailsJSON) | AC-EVALITEM-003-1, AC-EVALITEM-003-2, AC-EVALITEM-UBI-002 | R-EVALITEM-007 (RESOLVED) |
+| audit resource_id 결정성 (동일 hierarchy_code → 동일 UUID, 재현 가능·충돌 없음) | AC-EVALITEM-003-E2-1 | R-EVALITEM-007 (RESOLVED) |
 | 외부 저장 서비스 호출 부적격 | AC-EVALITEM-UBI-001 | R-EVALITEM-005 |
 
 ---
@@ -439,7 +465,8 @@ plan.md §7 R-EVALITEM-001~006 risk register 매핑.
 | AC-EVALITEM-002-1/4 | 자기참조 SELECT 미구현 / 계층 단절 (002-E1a/E1b 분할) | GetEvalItemsByParentID + parent_id 인덱스 |
 | AC-EVALITEM-002-2 | 자식 있는 parent DELETE 성공(잘못) | FK ON DELETE RESTRICT |
 | AC-EVALITEM-002-3 | hierarchy_code 중복 허용 | UNIQUE 인덱스 + store 검증 |
-| AC-EVALITEM-003-1/2 | RecordEvalItem* 미구현 | recorder.go 메서드 2개 (기존 시그니처 패턴) |
+| AC-EVALITEM-003-1/2 | RecordEvalItem* 미구현 + (잘못) 원시 계층코드 resource_id 단언 → false RED | recorder.go 메서드 2개 + `uuid.NewSHA1(EvalItemAuditNamespace, hierarchyCode)` UUIDv5 surrogate, 실 식별자 DetailsJSON |
+| AC-EVALITEM-003-E2-1 | 비결정적/랜덤 resource_id (audit 추적성 붕괴) | `uuid.NewSHA1`(고정 namespace + hierarchy_code) 결정적·재현 가능 산출 |
 | AC-EVALITEM-003-3 | audit 실패 시 항목 잔존 | store tx.Rollback 양방향 |
 | AC-EVALITEM-004-1 | successor 미확인 변경 허용 | UpdateEvalItem mutation guard |
 | AC-EVALITEM-004-2 | status 임의값 허용 | status CHECK 제약 + store 검증 |
@@ -454,10 +481,10 @@ plan.md §7 R-EVALITEM-001~006 risk register 매핑.
 모두 PASS 필요:
 
 - [ ] §0: REQ-EVALITEM-UBI 전용 AC 4개 (UBI-001, UBI-002, UBI-003, UBI-004) 자동화 통과
-- [ ] §1-§4: 4개 modal REQ AC 자동화 통과 (AC-EVALITEM-001-{1..4, S1-1, O1-1}, AC-EVALITEM-002-{1..4}, AC-EVALITEM-003-{1..3}, AC-EVALITEM-004-{1..3})
+- [ ] §1-§4: 4개 modal REQ AC 자동화 통과 (AC-EVALITEM-001-{1..4, S1-1, O1-1}, AC-EVALITEM-002-{1..4}, AC-EVALITEM-003-{1..3, E2-1}, AC-EVALITEM-004-{1..3})
 - [ ] §5: 경계 AC (AC-EVALITEM-BOUNDARY-1) — evidences FK 부재 + evidences 미수정 확인
 - [ ] §6: 한국 공공 6제약 검증 통과
-- [ ] §7: 16개 edge case 모두 대응 AC로 검증 (REQ-EVALITEM-001-O1은 AC-EVALITEM-001-O1-1, REQ-EVALITEM-001-S1 실패 경로는 AC-EVALITEM-001-S1-1 전용 AC로 매핑)
+- [ ] §7: 18개 edge case 모두 대응 AC로 검증 (REQ-EVALITEM-001-O1→AC-EVALITEM-001-O1-1, REQ-EVALITEM-001-S1 실패경로→AC-EVALITEM-001-S1-1, AUD-1 resource_id 전략/결정성→AC-EVALITEM-003-1/2/E2-1 전용 매핑)
 - [ ] coverage ≥ 85% (go test -cover)
 - [ ] golangci-lint default + gosec 0 issue
 - [ ] `goleak.VerifyNone(t)` 모든 테스트 통과
@@ -466,4 +493,4 @@ plan.md §7 R-EVALITEM-001~006 risk register 매핑.
 - [ ] manager-quality TRUST 5 통과
 - [ ] evaluator-active per-sprint scoring 모두 ≥ 0.75 (strict profile, thorough harness)
 
-**Total AC count**: 21 — (§0 UBI: 4 [UBI-001, UBI-002, UBI-003, UBI-004], §1: 6 [AC-EVALITEM-001-1..4, AC-EVALITEM-001-S1-1, AC-EVALITEM-001-O1-1], §2: 4 [AC-EVALITEM-002-1..4], §3: 3 [AC-EVALITEM-003-1..3], §4: 3 [AC-EVALITEM-004-1..3], §5: 1 [AC-EVALITEM-BOUNDARY-1]). 각 modal REQ 모듈은 최소 3개 AC (≥2 요건 충족, §1은 6개·§2는 4개). 버전 이력: v0.1.1에서 AC-EVALITEM-001-O1-1 추가 (D1 정정, REQ-EVALITEM-001-O1 Optional 1:1 coverage, 19→20). v0.1.2에서 AC-EVALITEM-001-S1-1 추가 (LOW-2 정정, REQ-EVALITEM-001-S1 실패 경로 — 존재하지 않는 parent_id INSERT 시 FK 위반 거부 — 전용 coverage, 20→21). SPEC-AX-EVID-001 v0.1.x 점진 보강 패턴과 동일.
+**Total AC count**: 22 — (§0 UBI: 4 [UBI-001, UBI-002, UBI-003, UBI-004], §1: 6 [AC-EVALITEM-001-1..4, AC-EVALITEM-001-S1-1, AC-EVALITEM-001-O1-1], §2: 4 [AC-EVALITEM-002-1..4], §3: 4 [AC-EVALITEM-003-1..3, AC-EVALITEM-003-E2-1], §4: 3 [AC-EVALITEM-004-1..3], §5: 1 [AC-EVALITEM-BOUNDARY-1]). 각 modal REQ 모듈은 최소 3개 AC (≥2 요건 충족, §1은 6개·§2/§3은 4개). 버전 이력: v0.1.1 AC-EVALITEM-001-O1-1 추가 (D1, REQ-EVALITEM-001-O1 1:1 coverage, 19→20). v0.1.2 AC-EVALITEM-001-S1-1 추가 (LOW-2, REQ-EVALITEM-001-S1 실패 경로, 20→21). v0.1.3 AC-EVALITEM-003-E2-1 추가 (Run Phase 1 Decision 3, REQ-EVALITEM-003-E2 AUD-1 resource_id 결정성 — 신규 EARS sub-clause, 21→22); 동시에 AC-EVALITEM-003-1/2 + AC-EVALITEM-UBI-002 텍스트를 AUD-1 deterministic UUIDv5 기준으로 정정(원시 계층코드 resource_id false RED 제거). SPEC-AX-EVID-001 v0.1.x 점진 보강 패턴과 동일.

@@ -291,3 +291,78 @@ func (r *Recorder) RecordEvidenceVersioned(ctx context.Context, tx AuditTx, evid
 	}
 	return tx.InsertAuditLog(ctx, e)
 }
+
+// evalItemResourceID 계층코드를 AUD-1 결정적 UUIDv5 surrogate로 변환한다.
+// evaluation_items.id는 VARCHAR(64) 계층코드라 audit_logs.resource_id(uuid.UUID NOT NULL)에
+// 직접 들어갈 수 없다 (parseResourceID는 uuid.Nil 반환 — E-07 회피). 고정 namespace 기반
+// uuid.NewSHA1로 동일 hierarchy_code는 항상 byte-identical UUID를 산출한다 (§6.6 AUD-1).
+//
+// uuid.NewSHA1은 RFC 4122 v5 정의상 SHA-1을 사용한다 — 식별자 파생이지 암호 해시가 아님.
+//
+//nolint:gosec // RFC 4122 UUID v5 name-based, not cryptographic (SEC-07)
+func evalItemResourceID(hierarchyCode string) uuid.UUID {
+	return uuid.NewSHA1(EvalItemAuditNamespace, []byte(hierarchyCode))
+}
+
+// evalItemDetails 평가항목 감사 DetailsJSON을 직렬화한다.
+// 실 식별자(eval_item_id, hierarchy_code, parent_id?, level?)는 resource_id surrogate가
+// 보유할 수 없으므로 details에 기록한다 (REQ-EVALITEM-003-E1). parentID 빈 문자열이면 키 부재.
+func evalItemDetails(itemID, hierarchyCode, parentID string, level int) ([]byte, error) {
+	d := map[string]string{
+		"eval_item_id":   itemID,
+		"hierarchy_code": hierarchyCode,
+		"level":          strconv.Itoa(level),
+	}
+	if parentID != "" {
+		d["parent_id"] = parentID
+	}
+	b, err := json.Marshal(d)
+	if err != nil {
+		return nil, fmt.Errorf("recorder: marshal eval_item details: %w", err)
+	}
+	return b, nil
+}
+
+// RecordEvalItemCreated EVAL_ITEM_CREATED 감사 이벤트를 기록 (SPEC-AX-EVAL-ITEM-001)
+// 항목(루트/자식) 생성과 동일 AuditTx에 audit_logs 1건 (REQ-EVALITEM-UBI-002 / REQ-EVALITEM-003-E1)
+// resource_id = AUD-1 결정적 UUIDv5 surrogate, 실 식별자는 DetailsJSON (§6.6)
+//
+// @MX:ANCHOR: [AUTO] 평가항목 생성 감사 단일 진입점 — REQ-EVALITEM-UBI-002 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — AUD-1 결정성 계약 (SEC-05)
+func (r *Recorder) RecordEvalItemCreated(ctx context.Context, tx AuditTx, itemID, hierarchyCode, parentID string, level int, userID string) error {
+	details, err := evalItemDetails(itemID, hierarchyCode, parentID, level)
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionEvalItemCreated,
+		ResourceType: "evaluation_item",
+		ResourceID:   evalItemResourceID(hierarchyCode),
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordEvalItemUpdated EVAL_ITEM_UPDATED 감사 이벤트를 기록 (SPEC-AX-EVAL-ITEM-001)
+// 항목 속성/상태 변경과 동일 AuditTx에 audit_logs 1건 (REQ-EVALITEM-UBI-002 / REQ-EVALITEM-004-O1)
+// RecordEvalItemCreated와 동일 resource_id 산출 로직 — 동일 hierarchy_code 상관관계 유지
+//
+// @MX:ANCHOR: [AUTO] 평가항목 수정 감사 단일 진입점 — REQ-EVALITEM-UBI-002 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — AUD-1 결정성 계약 (SEC-05)
+func (r *Recorder) RecordEvalItemUpdated(ctx context.Context, tx AuditTx, itemID, hierarchyCode, parentID string, level int, userID string) error {
+	details, err := evalItemDetails(itemID, hierarchyCode, parentID, level)
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionEvalItemUpdated,
+		ResourceType: "evaluation_item",
+		ResourceID:   evalItemResourceID(hierarchyCode),
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}

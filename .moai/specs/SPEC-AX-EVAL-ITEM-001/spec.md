@@ -1,6 +1,6 @@
 ---
 id: SPEC-AX-EVAL-ITEM-001
-version: 0.1.2
+version: 0.1.3
 status: draft
 created: 2026-05-18
 updated: 2026-05-18
@@ -11,6 +11,7 @@ issue_number: 0
 
 # HISTORY
 
+- 0.1.3 (2026-05-18): Run Phase 1 전략 Human Gate 3개 결정 승인 반영 (manager-strategy strategy.md §1/§2 분석 + 사용자 sign-off). 결정 1(§6 taxonomy 구조 = **Option A RESOLVED** — plan.md §6 "OPEN/CONFIRMABLE" → "RESOLVED: Option A 자기참조 adjacency list", SPEC-AX-EVID-001 §6 RESOLVED 동위상. 가중 A 9.0 ≫ C 6.55 > D 3.40 > B 3.25; B 기각=4테이블 saga audit 원자성 위반+`evidences.evaluation_item_id` FK-target 모호성, D 기각=node별 PK 부재로 §1.4 VARCHAR(64) HARD 계약 직접 위배, C=재귀 subtree 요구 시 named post-PoC 전환 경로. spec.md §1.4/§3.3/§5#8/§6 OPEN 표현을 확정 표현으로 정정). 결정 2(audit `resource_id` = **AUD-1 deterministic UUIDv5 RESOLVED** — spec.md §6 line ~209 "run 단계 이연" 항목 확정. 검증된 모순: `audit.Event.ResourceID`=`uuid.UUID`(audit.go:72), `audit_logs.resource_id`=`UUID NOT NULL`(initial.sql:119), `parseResourceID` 비-UUID 시 `uuid.Nil`(recorder.go:90-94), `evaluation_items.id`=VARCHAR(64) 계층코드 직접 저장 불가. 해결: `RecordEvalItem*`가 계층코드를 `uuid.NewSHA1(EvalItemAuditNamespace, []byte(hierarchyCode))` 결정적 UUIDv5로 변환해 `Event.ResourceID`에 저장, 실 식별자(`eval_item_id`/`hierarchy_code`/`parent_id`/`level`)는 `DetailsJSON`. `EvalItemAuditNamespace` 고정 상수 UUID는 `internal/audit/audit.go`에 정의. `initial.sql` 불변(§2.2 HARD), 신규 외부 dep 0(`google/uuid` recorder.go:91 기존 import), Cross-SPEC 무영향. REQ-EVALITEM-003-E1 재작성 + REQ-EVALITEM-003-E2(결정성) 신규. spec.md §3.4/§6.6(plan)). 결정 3(AC-EVALITEM-003-1/003-2 텍스트 정정 — `resource_id='AX-SAFETY-ORG-01'` 원시 계층코드 단언은 `uuid.UUID` 컬럼 보유 불가 false RED → AUD-1 기준 재작성: `resource_id`=결정적 UUIDv5, 실 계층코드는 `details->>'hierarchy_code'`/`details->>'eval_item_id'`로 검증, resource_id 결정성 검증 절 추가. REQ-EVALITEM-003-E2 신규로 §3 13개→14개 modal sub-clause, AC 카운트 21→22(AC-EVALITEM-003-E2-1 추가). §7/§8/§9·spec-compact.md 일관 갱신). (작성자: ircp)
 - 0.1.2 (2026-05-18): evaluator-active 교차검증 AGREE-PASS 반영 (plan-auditor PASS 0.955 확인, Run 진입 전 LOW 2건 정정). LOW-1(acceptance.md AC-EVALITEM-001-O1-1 Then 표현 정정 — "byte-identical(verbatim) JSONB / 키 재정렬 0건"은 PostgreSQL JSONB 키 순서·공백·중복키 정규화로 올바른 구현에서도 달성 불가 → false RED 유발. REQ-EVALITEM-001-O1이 저장 타입을 "opaque JSONB column"으로 명시했으므로 "semantically equivalent JSONB (필드 누락/값 변형 0건, PostgreSQL JSONB value-equality 기준 — 키 순서/공백/중복키는 JSONB 정규화 범위로 비교 제외)"로 정정. 테스트 구현이 byte-level string 비교가 아닌 semantic JSON equality(map unmarshal + DeepEqual / jsonEqual())를 사용해야 함을 AC 비고에 명시. §8 RED/GREEN 매핑 동기화). LOW-2(REQ-EVALITEM-001-S1 실패 경로 coverage 보강 — AC-EVALITEM-001-2는 success 경로만 검증했으므로, 존재하지 않는 parent_id로 항목 생성 시 INSERT 시점 FK 위반 거부·행 미생성·audit 미기록(orphan 방지) 전용 AC-EVALITEM-001-S1-1을 §1에 신규 추가. ON DELETE RESTRICT(AC-EVALITEM-002-2)와 별개 경로임을 명시. §7 Edge Case Catalog/§8 RED·GREEN/§9 DoD AC 카운트 일관 갱신 20→21, edge case 15→16, spec-compact.md 동기화). evaluator 보고서 파일 경로(`.moai/reports/evaluator/SPEC-AX-EVAL-ITEM-001-xvalidate-1.md`)는 디스크 미존재였으나 LOW-1/LOW-2 결함이 현행 SPEC 텍스트에 대해 독립 검증되어 정정 수행. (작성자: ircp)
 - 0.1.1 (2026-05-18): plan-auditor iter1 리뷰 반영 (PASS 0.955, minor 결함 2건 정정 + 1건 수용). D1(REQ-EVALITEM-001-O1 coverage illusion 해소 — acceptance.md §1에 전용 AC-EVALITEM-001-O1-1 신규 추가, 기존 AC-EVALITEM-004-3 내부 간접 검증을 update-경로 보조 검증으로 강등하고 O1 1:1 coverage를 §1 전용 AC로 이관, §7 Edge Case Catalog/§8 RED·GREEN/§9 DoD AC 카운트 일관 갱신 19→20, spec-compact.md 동기화 — SPEC-AX-EVID-001 v0.1.2 D1 정정 AC-EVID-001-O1-1 추가 패턴과 동일). D2(spec.md §3.3 REQ-EVALITEM-002-E1 복합 event-driven 문장을 1트리거-1응답 atomic 절 REQ-EVALITEM-002-E1a(root, parent_id NULL) / REQ-EVALITEM-002-E1b(child, non-NULL parent_id)로 분할 — EARS 의미·검증 범위 불변, AC-EVALITEM-002-1이 양 절 검증, REQ modal 모듈 수 ≤5 유지(002 모듈 내 sub-clause 분할이며 신규 modal 모듈 미추가)). D3(research.md provenance 부정확 — §1 EvalItemTx 열거 UpdateEvalItem 누락, §6 EVID-001 v0.1.0 인용)은 Phase 0.5 frozen 시점 지원 산출물로 비채점 수용 — 4종 SPEC 문서가 EVID-001 v0.1.2 기준 + UpdateEvalItem 포함으로 내부 정합하므로 research.md 미수정. (작성자: ircp)
 - 0.1.0 (2026-05-18): 경영평가 평가항목 taxonomy(Evaluation Item Taxonomy) 첫 초안. iroum-ax Go control-plane을 brownfield 확장하여 평가범주 → 평가항목 → 평가지표 → 배점·가중치·등급기준 4계층 taxonomy의 **기초 데이터 모델 + store 계층 + audit 연계 Walking Skeleton**을 정의. 자기참조 adjacency-list 단일 테이블(`evaluation_items`, `parent_id` 자기 FK), `id`는 **계층 코드 형태 VARCHAR(64)** (auto-increment/UUID 아님) — SPEC-AX-EVID-001의 `evidences.evaluation_item_id VARCHAR(64)` FK-제약-없는 stub과 **타입 호환** 필수(미래 FK 승격 대비). SPEC-AX-CTRL-001의 `WorkflowStore`/`WorkflowTx`/`Recorder`/`AuditTx` 패턴(GREEN 가정), SPEC-AX-EVID-001의 `EvidenceStore`/`EvidenceTx` 미러링 선례(완료, v0.1.2) 위에 `EvalItemStore`/`EvalItemTx`/`RecordEvalItem*`를 동일 패턴으로 추가. 평가편람(HWP/PDF) import·파싱, 등급기준(scoring rubric) 저장 설계, 항목 CRUD/REST API, Console UI, `evidences` FK 하드닝(EVID-001 코드 변경 포함)은 의도적 제외(후속 SPEC). (작성자: ircp)
@@ -122,7 +123,7 @@ Ubiquitous 요구사항은 SPEC-AX-001 / SPEC-AX-CTRL-001 / SPEC-AX-EVID-001의 
 
 ### 3.3 REQ-EVALITEM-002 — 계층 구조 & 자기참조 (Hierarchy & Adjacency List)
 
-본 SPEC은 research.md §5 Option A(단일 자기참조 adjacency-list 테이블)를 작업 설계로 채택한다. 본 결정은 strategy 단계에서 A/B/C/D 트레이드오프(plan.md §6)를 통해 최종 확정된다.
+본 SPEC은 **Option A(단일 자기참조 adjacency-list 테이블)를 확정 채택**한다 (Run Phase 1 strategy.md §1 + Human Gate Decision Point 1 승인 — 가중 A 9.0 ≫ C 6.55 > D 3.40 > B 3.25, plan.md §6 RESOLVED). C(closure table)는 재귀 subtree 요구 발생 시의 named post-PoC 전환 경로이다.
 
 #### Event-driven
 
@@ -143,9 +144,12 @@ Ubiquitous 요구사항은 SPEC-AX-001 / SPEC-AX-CTRL-001 / SPEC-AX-EVID-001의 
 
 기존 `internal/audit` Recorder 패턴을 확장한다. 새 액션 상수 `ActionEvalItemCreated Action = "EVAL_ITEM_CREATED"`, `ActionEvalItemUpdated Action = "EVAL_ITEM_UPDATED"`를 추가하고, `Recorder`에 `RecordEvalItemCreated`/`RecordEvalItemUpdated` 메서드를 추가한다 (기존 `RecordCreated(ctx, tx AuditTx, ...)` / `RecordEvidenceCreated` 시그니처 패턴, 로컬 `AuditTx` 인터페이스 유지 — store→audit 순환 의존 회피).
 
+> **Audit `resource_id` 전략 — RESOLVED: AUD-1 (deterministic UUIDv5 surrogate)** (Run Phase 1 strategy.md §2 + Human Gate Decision Point 2 승인, plan.md §6.6). 모순: `audit.Event.ResourceID`는 `uuid.UUID`(`audit.go:72`), `audit_logs.resource_id`는 `UUID NOT NULL`(`initial.sql:119`), `parseResourceID`는 비-UUID 입력 시 `uuid.Nil` 반환(`recorder.go:90-94`)이나 `evaluation_items.id`는 VARCHAR(64) 계층 코드라 직접 저장 불가. 해결: `RecordEvalItem*`는 계층 코드를 **결정적 UUIDv5**(`uuid.NewSHA1(EvalItemAuditNamespace, []byte(hierarchyCode))` — `github.com/google/uuid` 기존 import `recorder.go:91`, 신규 외부 의존 0건, 데이터 주권 REQ-EVALITEM-UBI-001 정합)로 변환해 `Event.ResourceID`에 저장하고, 실제 식별자는 `DetailsJSON`에 기록한다. `EvalItemAuditNamespace`는 고정 상수 UUID 1개를 `internal/audit/audit.go`에 정의한다. `initial.sql`은 수정하지 않는다(§2.2 [EXISTING] HARD — schema drift 방지, Cross-SPEC 무영향). `evaluation_items.id`는 VARCHAR(64) 계층 코드를 유지하며 UUIDv5는 audit `resource_id` surrogate에만 한정된다(§1.4 HARD 계약 불변).
+
 #### Event-driven
 
-- **REQ-EVALITEM-003-E1**: WHEN an evaluation item create or update transaction calls `Recorder.RecordEvalItemCreated` or `Recorder.RecordEvalItemUpdated` with the active `AuditTx`, THEN the Recorder SHALL construct an `audit.Event` with `Action` ∈ {`EVAL_ITEM_CREATED`, `EVAL_ITEM_UPDATED`}, `ResourceType="evaluation_item"`, `ResourceID`=the evaluation item `id`, `UserID`=`resolveUserID(userID)`, and `DetailsJSON` containing `{hierarchy_code, parent_id?, level?}`, and SHALL insert it via the same `AuditTx` (동일 트랜잭션).
+- **REQ-EVALITEM-003-E1**: WHEN an evaluation item create or update transaction calls `Recorder.RecordEvalItemCreated` or `Recorder.RecordEvalItemUpdated` with the active `AuditTx`, THEN the Recorder SHALL construct an `audit.Event` with `Action` ∈ {`EVAL_ITEM_CREATED`, `EVAL_ITEM_UPDATED`}, `ResourceType="evaluation_item"`, `ResourceID` = the **deterministic UUIDv5** derived as `uuid.NewSHA1(EvalItemAuditNamespace, []byte(hierarchyCode))` (NOT the raw VARCHAR(64) `id` — `resource_id` 컬럼이 `uuid.UUID NOT NULL`이므로), `UserID`=`resolveUserID(userID)`, and `DetailsJSON` containing `{eval_item_id, hierarchy_code, parent_id?, level?}` (실제 계층 식별자는 `DetailsJSON`에 보존), and SHALL insert it via the same `AuditTx` (동일 트랜잭션).
+- **REQ-EVALITEM-003-E2**: WHEN `RecordEvalItem*` derives the audit `ResourceID` for a given `hierarchy_code`, THEN the derivation SHALL be deterministic — invoking the derivation again with the same `hierarchy_code` and the same fixed `EvalItemAuditNamespace` SHALL produce a byte-identical `uuid.UUID` (재현 가능·충돌 없는 surrogate, audit 추적성 보장).
 
 #### Unwanted
 
@@ -197,7 +201,7 @@ Ubiquitous 요구사항은 SPEC-AX-001 / SPEC-AX-CTRL-001 / SPEC-AX-EVID-001의 
 5. **항목 CRUD REST API / 삭제 API / Console UI** — HTTP 엔드포인트(생성/조회/수정/삭제), 평가항목 트리 뷰어, `apps/console/` 화면 일체 제외. 본 SPEC은 store 계층 메서드 + audit 연계만 다룬다 (삭제는 DB ON DELETE RESTRICT 제약만 정의, 삭제 경로 미구현).
 6. **`evidences.evaluation_item_id` FK 하드닝 (EVID-001 코드 변경 포함)** — `evidences` 테이블에 `evaluation_item_id → evaluation_items(id)` FK 제약을 소급 추가하는 작업, 그리고 그에 수반되는 SPEC-AX-EVID-001 코드/마이그레이션 변경은 **본 SPEC 범위 밖**이다. 본 SPEC은 타입 호환(VARCHAR(64))되는 `evaluation_items` 테이블을 제공하기만 한다. FK 하드닝은 미래 별도 SPEC이 수행하며(SPEC-AX-EVID-001 §5 Exclusion #1 / plan.md §8 downstream 추적 역참조 예정), 그때까지 `evidences.evaluation_item_id`는 FK 없는 stub으로 유지된다(AC-EVALITEM-BOUNDARY-1로 경계 확인).
 7. **계층 재배치 / 트리 이동 (re-parenting)** — 자식이 있는 항목의 `parent_id`/`level` 변경(서브트리 이동), 대량 트리 재구성은 REQ-EVALITEM-UBI-004로 금지되며 본 SPEC 범위 밖. 잎 노드 단순 속성 수정만 지원.
-8. **closure table / JSONB nested / 다단계 정규화 구조** — research.md §5의 Option B/C/D는 본 SPEC에서 채택하지 않는다(Option A 자기참조 adjacency list 작업 설계). 대체 구조 전환은 post-PoC strategy 재검토 (plan.md §6 트레이드오프 표).
+8. **closure table / JSONB nested / 다단계 정규화 구조** — Option A 자기참조 adjacency list 확정(plan.md §6 RESOLVED — Run Phase 1 strategy + Human Gate, 가중 A 9.0). B(4-table)·D(JSONB nested)는 기각, C(closure)는 재귀 subtree 요구 발생 시 named post-PoC 전환 경로(본 SPEC 미구현).
 9. **마이그레이션 도구 통합 (alembic / golang-migrate)** — `0003_eval_item_tables.sql` 수동 멱등 SQL 단일 패치. 마이그레이션 러너 도구 제외 (SPEC-AX-CTRL-001 / SPEC-AX-EVID-001 §5 동일 정책).
 
 ---
@@ -206,7 +210,7 @@ Ubiquitous 요구사항은 SPEC-AX-001 / SPEC-AX-CTRL-001 / SPEC-AX-EVID-001의 
 
 - **SPEC-AX-CTRL-001 GREEN 가정**: `internal/store`의 `WorkflowStore`/`WorkflowTx` 인터페이스, `internal/audit`의 `Recorder`/`AuditTx`/`Action`/`Event`/`DefaultUserID`, 단일 pgx pool 와이어링이 모두 GREEN 상태이고 source-verified (research.md §1에서 `store.go`, `recorder.go`, `audit.go`, `pg_store.go`, `initial.sql` 실 시그니처 확인 — phantom API 없음).
 - **SPEC-AX-EVID-001 완료(v0.1.2) 선례 재사용**: `EvidenceStore`/`EvidenceTx` 미러링 패턴, `RecordEvidenceCreated`/`RecordEvidenceVersioned` 추가 패턴, `BeginEvidenceTx`(`pg_store.go` 실 pool 재사용) 진입점 패턴, `0002_evidence_tables.sql` 멱등 SQL 규약을 본 SPEC의 `EvalItemStore`/`EvalItemTx`/`RecordEvalItem*`/`BeginEvalItemTx`/`0003_eval_item_tables.sql`이 동일하게 미러링한다.
-- **`audit_logs` 테이블 스키마 재사용**: `initial.sql`의 `audit_logs`(id, user_id VARCHAR(64), action VARCHAR(64), resource_id, resource_type VARCHAR(32), timestamp, details JSONB)를 그대로 사용한다. 본 SPEC은 `audit_logs` schema를 변경하지 않는다. (`resource_id` 컬럼이 UUID 타입일 경우 평가항목 VARCHAR(64) id의 audit 기록 표현은 run 단계 store 구현 시 기존 Recorder의 `parseResourceID` 처리 경로 확인 후 결정 — research.md §1, §8 R-EVALITEM-005.)
+- **`audit_logs` 테이블 스키마 재사용**: `initial.sql`의 `audit_logs`(id, user_id VARCHAR(64), action VARCHAR(64), resource_id `UUID NOT NULL`, resource_type VARCHAR(32), timestamp, details JSONB)를 그대로 사용한다. 본 SPEC은 `audit_logs` schema를 변경하지 않는다(§2.2 [EXISTING] HARD). **RESOLVED: `resource_id`(`uuid.UUID NOT NULL`, `audit.go:72`/`initial.sql:119`)와 VARCHAR(64) 계층 코드 id의 타입 불일치는 AUD-1(deterministic UUIDv5 surrogate `uuid.NewSHA1(EvalItemAuditNamespace, []byte(hierarchyCode))`, 실 식별자는 `DetailsJSON`)로 확정**(Run Phase 1 strategy.md §2 + Human Gate Decision Point 2, §3.4 REQ-EVALITEM-003 / plan.md §6.6 — 이전 v0.1.2까지 run 단계 이연 항목이었으나 본 v0.1.3에서 확정).
 - **`evaluation_items` 테이블 신규**: `0003_eval_item_tables.sql`로 추가. `initial.sql` 미수정 (schema drift 방지).
 - **EVID-001 stub과의 단방향 type 계약**: 본 SPEC은 `evaluation_items` 테이블의 provider이며, `evidences.evaluation_item_id`(VARCHAR(64) stub)에 대한 역 FK는 생성하지 않는다(§5 Exclusion #6). 순환 의존 없음 — EVID-001은 본 SPEC 없이 이미 GREEN(완료)이다.
 - **Go 1.22+**, module `github.com/ircp/iroum-ax`. 주요 의존성: `github.com/jackc/pgx/v5`, `go.uber.org/zap`, `github.com/stretchr/testify`, `github.com/testcontainers/testcontainers-go` (test). UUID 라이브러리는 본 SPEC에서 사용하지 않는다(`id`가 계층 코드 VARCHAR(64)이므로).
@@ -223,7 +227,7 @@ Ubiquitous 요구사항은 SPEC-AX-001 / SPEC-AX-CTRL-001 / SPEC-AX-EVID-001의 
 - **평가편람 import/파싱**: HWP/PDF 파싱, 항목 자동 추출은 Python `ingestion`/`mapping` 파이프라인 책임이며 본 SPEC 범위 아님.
 - **항목 CRUD/REST/Console**: HTTP 엔드포인트, 평가항목 트리 UI는 본 SPEC 범위 밖. store 계층 + audit만.
 - **평가항목 권한/조직 격리**: SPEC-AX-AUTH 계열 책임. 본 SPEC은 cli-anonymous 기본값만.
-- **closure table / JSONB nested 구조**: research.md §5 Option B/C/D는 post-PoC 이연 (Option A 작업 설계, strategy 단계 확정 — plan.md §6).
+- **closure table / JSONB nested 구조**: Option A 확정(plan.md §6 RESOLVED — Run Phase 1 strategy + Human Gate). B(4-table)/D(JSONB nested)는 기각, C(closure)는 재귀 subtree 요구 시의 named post-PoC 전환 경로.
 
 ---
 

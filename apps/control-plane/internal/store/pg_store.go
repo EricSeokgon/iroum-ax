@@ -108,6 +108,21 @@ func (s *PgWorkflowStore) BeginEvidenceTx(ctx context.Context) (EvidenceTx, erro
 	return &PgEvidenceTx{tx: tx, logger: s.logger}, nil
 }
 
+// BeginEvalItemTx 새로운 평가항목 트랜잭션을 시작하여 PgEvalItemTx를 반환
+// 기존 워크플로우용 BeginTx / 증빙용 BeginEvidenceTx와 동일한 단일 pgx pool(R-EVALITEM-005)을 재사용한다.
+// 신규 pool을 생성하지 않으며, postgres.go(死 스텁)는 대상이 아니다 (plan.md §1 phantom-path 회피, TH-13).
+// 반환된 EvalItemTx는 반드시 Commit 또는 Rollback 중 하나로 종료해야 함
+//
+// @MX:ANCHOR: [AUTO] 평가항목 도메인 유일 TX 진입점 — 핸들러/통합 테스트 3곳 이상에서 호출
+// @MX:REASON: 단일 pool 싱글톤 재사용(R-EVALITEM-005) 계약 — 신규 pgxpool 생성 금지, pg_store.go:103 BeginEvidenceTx 패턴 미러
+func (s *PgWorkflowStore) BeginEvalItemTx(ctx context.Context) (EvalItemTx, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return nil, fmt.Errorf("BeginEvalItemTx 실패: %w", stderrors.ErrPgxPoolExhausted)
+	}
+	return &PgEvalItemTx{tx: tx, logger: s.logger}, nil
+}
+
 // PgWorkflowTx pgx.Tx 래퍼 — WorkflowTx 인터페이스 구현
 // 단일 PostgreSQL 트랜잭션 내에서 모든 쓰기 연산을 수행
 //

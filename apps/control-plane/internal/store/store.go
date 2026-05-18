@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -96,6 +97,112 @@ type EvidenceTx interface {
 	// MarkSuperseded 직전 버전 행의 status를 ACTIVE → SUPERSEDED로 전이 (store 계층 소유 — GAP-04)
 	// 본문 컬럼은 절대 변경하지 않으며 status만 전이 (REQ-EVID-UBI-004)
 	MarkSuperseded(ctx context.Context, id uuid.UUID) error
+	// InsertAuditLog 현재 트랜잭션 내에 감사 이벤트를 삽입 (Recorder가 호출)
+	InsertAuditLog(ctx context.Context, e *audit.Event) error
+	// Commit 현재 트랜잭션을 커밋하여 모든 변경사항을 영속화
+	Commit(ctx context.Context) error
+	// Rollback 현재 트랜잭션을 롤백 — defer로 호출하는 것이 안전, Commit 후 무시
+	Rollback(ctx context.Context) error
+}
+
+// EvalItemStore 평가항목 taxonomy 영속성 최상위 인터페이스 (SPEC-AX-EVAL-ITEM-001 REQ-EVALITEM-001)
+// EvidenceStore 패턴을 미러링하여 BeginEvalItemTx 트랜잭션 진입점만 제공한다.
+// 실제 DB 접근은 EvalItemTx를 통해서만 수행 (raw SQL 누출 방지).
+//
+// @MX:ANCHOR: [AUTO] eval_item store 구현, recorder 연계, 향후 계층 조회 caller 등 3개 이상 호출자 예정
+// @MX:REASON: 기존 EvidenceStore와 동일 — 평가항목 도메인 단일 DB 접근 계약. 실 PgWorkflowStore.pool 재사용(R-EVALITEM-005)
+type EvalItemStore interface {
+	// BeginEvalItemTx 새로운 평가항목 트랜잭션을 시작하여 반환
+	// 반환된 EvalItemTx는 반드시 Commit 또는 Rollback 중 하나로 종료해야 함
+	BeginEvalItemTx(ctx context.Context) (EvalItemTx, error)
+}
+
+// EvalItem 평가항목 도메인 엔티티 — evaluation_items 테이블 1행에 대응
+// 자기참조 adjacency list (Option A): root는 ParentID=nil, 자식은 부모 id를 ParentID로 보유
+// 필드 순서: map(8B) → time.Time(24B) 블록 → 포인터(8B) → 문자열(16B) → int 포인터(8B)
+// (golangci-lint fieldalignment govet 분석기 정합 — 큰→작은 순)
+type EvalItem struct {
+	// Metadata 임의 메타데이터 (JSONB opaque placeholder) — nil 허용, 본 SPEC 미해석
+	Metadata map[string]any
+	// CreatedAt 생성 시각 (TIMESTAMPTZ)
+	CreatedAt time.Time
+	// UpdatedAt 갱신 시각 (TIMESTAMPTZ)
+	UpdatedAt time.Time
+	// ParentID 부모 항목 id (root이면 nil) — 자기참조 FK
+	ParentID *string
+	// Level 계층 레벨 (1범주 2항목 3지표 4배점, informational) — nil 허용
+	Level *int
+	// Weight 가중치 0.0-1.0 — nil 허용
+	Weight *float64
+	// MaxScore 최대 점수 — nil 허용
+	MaxScore *int
+	// ID 계층 코드 PK (예: AX-SAFETY-ORG-01, VARCHAR(64) — UUID 아님)
+	ID string
+	// DisplayName 표시명 (NOT NULL)
+	DisplayName string
+	// Description 설명 — 빈 문자열 허용
+	Description string
+	// HierarchyCode 경로 인코딩 (NOT NULL UNIQUE) — AUD-1 surrogate 입력
+	HierarchyCode string
+	// Status 'ACTIVE'|'DEPRECATED'|'ARCHIVED'
+	Status string
+	// CreatedBy 생성자 (audit.DefaultUserID 정합, 기본 'cli-anonymous')
+	CreatedBy string
+}
+
+// EvalItemUpdate UpdateEvalItem 부분 갱신 입력 (GAP-05 — option (a) nullable 필드)
+// nil 포인터 = "변경 요청 없음", non-nil = "해당 값으로 변경 요청".
+// mutation guard는 ParentID/Level가 non-nil일 때만 successor 검증 후 거부 판단한다.
+type EvalItemUpdate struct {
+	// ParentID non-nil이면 부모 변경 요청 (자식 보유 시 거부 — REQ-EVALITEM-UBI-004)
+	ParentID **string
+	// Level non-nil이면 레벨 변경 요청 (자식 보유 시 거부)
+	Level *int
+	// DisplayName non-nil이면 표시명 변경
+	DisplayName *string
+	// Description non-nil이면 설명 변경
+	Description *string
+	// Weight non-nil이면 가중치 변경
+	Weight *float64
+	// MaxScore non-nil이면 최대 점수 변경
+	MaxScore *int
+	// Status non-nil이면 status 전이 요청 (열거 외/NULL 거부 — REQ-EVALITEM-004-U1)
+	Status *string
+	// Metadata non-nil이면 metadata verbatim 갱신 (semantic round-trip)
+	Metadata *map[string]any
+}
+
+// EvalItemTx 단일 데이터베이스 트랜잭션 내 평가항목 쓰기/조회 연산 인터페이스
+// InsertEvalItem/UpdateEvalItem과 InsertAuditLog는 동일 트랜잭션 내에서 atomic하게 처리되어야 함
+// (REQ-EVALITEM-UBI-002 / REQ-EVALITEM-003-U1 트랜잭션 원자성 불변 조건)
+//
+// @MX:ANCHOR: [AUTO] AC-EVALITEM-003-3 / AC-EVALITEM-UBI-002 원자성 계약의 핵심
+// @MX:REASON: pgx 구현체(PgEvalItemTx) + 핸들러 TX orchestration 등 3곳 이상에서 사용 — 평가항목 원자성 단일 계약
+type EvalItemTx interface {
+	// InsertEvalItem evaluation_items 테이블에 새 행을 삽입하고 삽입된 id를 반환
+	// parentID가 nil이면 루트(parent_id NULL), 아니면 사전 조회로 부모 존재를 검증
+	// id/displayName/hierarchyCode blank·id 64자 초과·중복 PK는 SQL 미실행 후 거부
+	InsertEvalItem(
+		ctx context.Context,
+		id string,
+		parentID *string,
+		displayName, description string,
+		level *int,
+		hierarchyCode string,
+		weight *float64,
+		maxScore *int,
+		metadata map[string]any,
+	) (string, error)
+	// GetEvalItemByID 평가항목 id로 단건을 조회
+	// 존재하지 않으면 errors.ErrEvalItemNotFound를 래핑하여 반환 (raw pgx.ErrNoRows 금지)
+	GetEvalItemByID(ctx context.Context, id string) (*EvalItem, error)
+	// GetEvalItemsByParentID 동일 parent_id를 가진 직계 자식 목록을 반환
+	// 자식이 없으면 빈 슬라이스 반환 (error 아님 — GAP-02/DC-005.6)
+	GetEvalItemsByParentID(ctx context.Context, parentID string) ([]*EvalItem, error)
+	// UpdateEvalItem 평가항목을 부분 갱신
+	// 자식 보유 항목의 parent_id/level 변경 요청은 SQL 미실행 후 거부 (REQ-EVALITEM-UBI-004)
+	// status 열거 외/NULL 요청은 거부 (REQ-EVALITEM-004-U1)
+	UpdateEvalItem(ctx context.Context, id string, upd EvalItemUpdate) error
 	// InsertAuditLog 현재 트랜잭션 내에 감사 이벤트를 삽입 (Recorder가 호출)
 	InsertAuditLog(ctx context.Context, e *audit.Event) error
 	// Commit 현재 트랜잭션을 커밋하여 모든 변경사항을 영속화

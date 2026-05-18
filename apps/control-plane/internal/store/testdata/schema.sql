@@ -74,6 +74,32 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ============================================================
+-- 평가항목 테이블 (SPEC-AX-EVAL-ITEM-001 — migrations/0003_eval_item_tables.sql 미러)
+-- 자기참조 adjacency list (Option A), id=계층코드 VARCHAR(64), EVID-001 type-compat
+-- ============================================================
+CREATE TABLE IF NOT EXISTS evaluation_items (
+    id              VARCHAR(64) PRIMARY KEY,
+    parent_id       VARCHAR(64) REFERENCES evaluation_items(id) ON DELETE RESTRICT,
+    display_name    VARCHAR(256) NOT NULL,
+    description     TEXT,
+    level           INT,
+    hierarchy_code  VARCHAR(128) NOT NULL UNIQUE,
+    weight          DECIMAL(5,4),
+    max_score       INT,
+    status          VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+    metadata        JSONB,
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    created_by      VARCHAR(64) NOT NULL DEFAULT 'cli-anonymous',
+    updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    archived_at     TIMESTAMP WITH TIME ZONE
+);
+
+DO $$ BEGIN
+    ALTER TABLE evaluation_items ADD CONSTRAINT evaluation_items_status_chk
+        CHECK (status IN ('ACTIVE','DEPRECATED','ARCHIVED'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ============================================================
 -- 인덱스 정의
 -- ============================================================
 CREATE INDEX IF NOT EXISTS workflows_status_idx ON workflows (status);
@@ -82,3 +108,6 @@ CREATE INDEX IF NOT EXISTS audit_logs_resource_idx ON audit_logs (resource_type,
 CREATE INDEX IF NOT EXISTS audit_logs_user_id_timestamp_idx ON audit_logs (user_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS evidences_eval_item_version_idx ON evidences (evaluation_item_id, version DESC);
 CREATE INDEX IF NOT EXISTS evidences_created_at_idx ON evidences (created_at DESC);
+CREATE INDEX IF NOT EXISTS evaluation_items_parent_id_idx ON evaluation_items (parent_id);
+CREATE INDEX IF NOT EXISTS evaluation_items_hierarchy_code_idx ON evaluation_items (hierarchy_code);
+CREATE INDEX IF NOT EXISTS evaluation_items_created_at_idx ON evaluation_items (created_at DESC);
