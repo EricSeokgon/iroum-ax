@@ -6,7 +6,7 @@
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](pyproject.toml)
 [![Go](https://img.shields.io/badge/go-1.22-00ADD8.svg)](go.mod)
 [![Tests](https://img.shields.io/badge/tests-490+_passing-brightgreen.svg)](#)
-[![SPEC](https://img.shields.io/badge/SPECs-8_GREEN-purple.svg)](#)
+[![SPEC](https://img.shields.io/badge/SPECs-9_GREEN-purple.svg)](#)
 [![Security](https://img.shields.io/badge/Algorithm_Confusion_Attack-Defended-blue.svg)](#)
 
 > 한국 공공기관 경영평가 보고서 자동화 AI 플랫폼 — KEPCO E&C anchor
@@ -21,7 +21,7 @@ KEPCO E&C anchor 고객 대상 경영평가 자동화 플랫폼. HWP 문서 수�
 
 ## 프로젝트 상태
 
-**Walking Skeleton + Auth + Observability + ABAC + 증빙 관리 완료** (Sprint 0-7 + OBS + AUTH-003 + EVID-001, 2026-05-18)
+**Walking Skeleton + Auth + Observability + ABAC + 증빙 관리 + 평가항목 taxonomy 완료** (Sprint 0-7 + OBS + AUTH-003 + EVID-001 + EVAL-ITEM-001, 2026-05-18)
 
 **Python 파이프라인** (SPEC-AX-001 v0.1.2)
 - 192개 단위 테스트 통과 (83% 커버리지)
@@ -76,9 +76,19 @@ KEPCO E&C anchor 고객 대상 경영평가 자동화 플랫폼. HWP 문서 수�
 - `RecordEvidenceCreated` / `RecordEvidenceVersioned` 감사 Recorder 확장
 - evaluator-active PASS 0.930
 
+**Go 평가항목 taxonomy Walking Skeleton** (SPEC-AX-EVAL-ITEM-001 v0.1.3)
+- `evaluation_items` 테이블: Option A 자기참조 adjacency list (`id VARCHAR(64) PK` 계층 코드, `parent_id` self-FK ON DELETE RESTRICT, `hierarchy_code UNIQUE`) — 단일 테이블, 추가 테이블 없음
+- `EvalItemStore` / `EvalItemTx` 계층 — `PgWorkflowStore.pool` 단일 pgx 풀 재사용 (신규 연결 없음)
+- AUD-1 결정적 UUIDv5 audit surrogate: `resource_id = uuid.NewSHA1(EvalItemAuditNamespace, []byte(hierarchyCode))` — 실 식별자는 `DetailsJSON`
+- `EvalItemAuditNamespace = uuid.MustParse("a7f3c2e1-9b4d-5e6f-8a0b-1c2d3e4f5a6b")` (@MX:ANCHOR 불변식)
+- `RecordEvalItemCreated` / `RecordEvalItemUpdated` 감사 Recorder 확장 (`EVAL_ITEM_CREATED` / `EVAL_ITEM_UPDATED`)
+- 에러 센티널 5종: `ErrEvalItemNotFound`, `ErrEvalItemInvalidInput`, `ErrEvalItemParentNotFound`, `ErrEvalItemHierarchyImmutable`, `ErrEvalItemInvalidStatus`
+- **HTTP 엔드포인트 없음** (store/audit 계층 Walking Skeleton 전용); `eval_item.go` 커버리지 86.2%
+- evaluator-active PASS (Func 96 / Sec 95 / Craft 82 / Cons 97); plan-auditor PASS 0.955; 22 AC GREEN
+
 **품질**
 - TRUST 5 PASS (모든 5가지 차원): Tested ✓ | Readable ✓ | Unified ✓ | Secured ✓ | Trackable ✓
-- 8개 SPEC 통합 완료 (AX-001 + CTRL-001 + AUTH-001 + AUTH-002 + SERVER-001 + OBS-001 + AUTH-003 + EVID-001)
+- 9개 SPEC 통합 완료 (AX-001 + CTRL-001 + AUTH-001 + AUTH-002 + SERVER-001 + OBS-001 + AUTH-003 + EVID-001 + EVAL-ITEM-001)
 
 ---
 

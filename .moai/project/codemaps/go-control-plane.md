@@ -1,4 +1,4 @@
-# Go Control Plane 코드맵 (SPEC-AX-CTRL-001)
+# Go Control Plane 코드맵 (SPEC-AX-CTRL-001 · SPEC-AX-EVID-001 · SPEC-AX-EVAL-ITEM-001)
 
 ## 개요
 
@@ -246,7 +246,61 @@ type Event struct {
 
 ---
 
-### 7. 설정 및 타입 (`internal/config/`, `internal/types/`, `internal/errors/`, `internal/log/`)
+---
+
+### 7. 평가항목 taxonomy (`internal/store/store.go`, `internal/store/eval_item.go`, `internal/store/pg_store.go`, `internal/audit/audit.go`, `internal/audit/recorder.go`, `internal/errors/errors.go`)
+
+> SPEC-AX-EVAL-ITEM-001 v0.1.3 — 경영평가 평가항목 taxonomy Walking Skeleton
+> **HTTP 엔드포인트 없음** — store/audit 계층 전용 (cmd/server 무변경)
+
+**store.go** (`internal/store/store.go` — EvalItemStore/EvalItemTx 인터페이스)
+- `EvalItemStore` 인터페이스: `BeginEvalItemTx(ctx) (EvalItemTx, error)` — pgx 풀 재사용 진입점
+- `EvalItemTx` 인터페이스 (@MX:ANCHOR — fan_in ≥ 3):
+  - `InsertEvalItem(ctx, id, displayName, hierarchyCode, level string, parentID *string, metadata map[string]any) error`
+  - `GetEvalItemByID(ctx, id string) (*EvalItem, error)`
+  - `GetEvalItemsByParentID(ctx, parentID string) ([]*EvalItem, error)`
+  - `UpdateEvalItem(ctx, id string, upd EvalItemUpdate) error`
+  - `InsertAuditLog(ctx, e audit.Event) error`
+  - `Commit() error`, `Rollback() error`
+- `EvalItemUpdate` struct: `Status *string`, `Metadata *map[string]any` (포인터 필드 — nil = 변경 없음, 부분 업데이트)
+
+**eval_item.go** (`internal/store/eval_item.go` — PgEvalItemTx 구현)
+- `PgEvalItemTx` struct: pgx.Tx 래퍼, @MX:WARN (InsertEvalItem/InsertAuditLog 사이 panic/early-return 시 orphan 항목 행 누출)
+- M1 리팩터 — 3-헬퍼 분리:
+  - `validateEvalItemInput`: id 공백·64자 초과·displayName 공백·hierarchyCode 공백 검증 → `ErrEvalItemInvalidInput`
+  - `validateStatusTransition(current, next string) error`: 허용 전이 매트릭스 검사 → `ErrEvalItemInvalidStatus`
+  - `checkHierarchyMutationGuard(ctx, tx, id) error`: 자식 항목 보유 시 계층 불변 보호 → `ErrEvalItemHierarchyImmutable`
+  - `buildEvalItemUpdateSet(upd EvalItemUpdate) ([]string, []any)`: 포인터 nil 검사로 SET 절 동적 구성
+- InsertEvalItem: parent 선존재 확인 → INSERT (orphan 방지, AC-EVALITEM-001-S1-1)
+
+**pg_store.go** (`internal/store/pg_store.go` — BeginEvalItemTx)
+- `BeginEvalItemTx(ctx) (EvalItemTx, error)` (@MX:ANCHOR): `s.pool.BeginTx` 재사용 — `PgWorkflowStore.pool` 단일 pgx 풀 (신규 pool 0건, EVID-001 `BeginEvidenceTx` 동일 패턴)
+- 반환: `&PgEvalItemTx{tx: tx, logger: s.logger}`
+
+**audit.go** (`internal/audit/audit.go` — AUD-1 불변식 상수)
+- `ActionEvalItemCreated Action = "EVAL_ITEM_CREATED"` — 평가항목 생성 감사 액션
+- `ActionEvalItemUpdated Action = "EVAL_ITEM_UPDATED"` — 평가항목 수정 감사 액션
+- `var EvalItemAuditNamespace = uuid.MustParse("a7f3c2e1-9b4d-5e6f-8a0b-1c2d3e4f5a6b")` (@MX:ANCHOR — AUD-1 불변식; 컴파일 타임 literal, runtime 생성 금지)
+
+**recorder.go** (`internal/audit/recorder.go` — 평가항목 감사 메서드)
+- `RecordEvalItemCreated(ctx, tx, hierarchyCode, displayName, level, parentID, userID string) error` (@MX:ANCHOR)
+  - AUD-1: `resource_id = uuid.NewSHA1(EvalItemAuditNamespace, []byte(hierarchyCode))` — 결정적 UUIDv5 surrogate
+  - 실 식별자(`eval_item_id`, `hierarchy_code`, `parent_id`, `level`)는 `DetailsJSON` 저장
+  - **resource_id = 원시 계층 코드 아님** (VARCHAR(64)는 UUID 컬럼 불가 — AUD-1 해결책)
+- `RecordEvalItemUpdated(ctx, tx, hierarchyCode, changedFields []string, userID string) error` (@MX:ANCHOR)
+  - 동일 AUD-1 UUIDv5 변환; `DetailsJSON`에 변경 필드 목록 포함
+
+**errors.go** (`internal/errors/errors.go` — 에러 센티널 5종 추가)
+- `ErrEvalItemNotFound = errors.New("evaluation item not found")`
+- `ErrEvalItemInvalidInput = errors.New("evaluation item invalid input")`
+- `ErrEvalItemParentNotFound = errors.New("evaluation item parent not found")`
+- `ErrEvalItemHierarchyImmutable = errors.New("evaluation item hierarchy is immutable: children exist")`
+- `ErrEvalItemInvalidStatus = errors.New("evaluation item invalid status value")`
+- (기존 workflow/evidence sentinel 비변경 — 추가적 합산)
+
+---
+
+### 8. 설정 및 타입 (`internal/config/`, `internal/types/`, `internal/errors/`, `internal/log/`)
 
 **config.go** (환경변수 파서)
 ```
@@ -277,7 +331,7 @@ LogLevel (기본: info)
 
 ---
 
-### 7. Protobuf 정의 (`internal/proto/`)
+### 9. Protobuf 정의 (`internal/proto/`)
 
 **workflow.pb.go** (수동 작성 proto 메시지)
 - WorkflowStatus enum

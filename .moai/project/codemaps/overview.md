@@ -13,7 +13,7 @@ iroum-ax는 정책 문서(HWP, PDF)를 자동으로 분석하여 적용 가능 �
 └────────────────────┬────────────────────────────────────────┘
                      │ REST + gRPC
 ┌────────────────────┴────────────────────────────────────────┐
-│ Go Control Plane (v0.1.3, SPEC-AX-CTRL-001 + SPEC-AX-EVID-001) │
+│ Go Control Plane (v0.1.3, SPEC-AX-CTRL-001 + SPEC-AX-EVID-001 + SPEC-AX-EVAL-ITEM-001) │
 │ ┌──────────────────────────────────────────────────────────┐ │
 │ │ gRPC Service (port 50051) + REST API (port 8080)        │ │
 │ │ - CreateWorkflow, GetWorkflow, ListWorkflows            │ │
@@ -43,6 +43,7 @@ iroum-ax는 정책 문서(HWP, PDF)를 자동으로 분석하여 적용 가능 �
     (workflows,              (celery queue)
      audit_logs,
      evidences,
+     evaluation_items,
      documents,
      pgvector)
 ```
@@ -64,11 +65,11 @@ iroum-ax는 정책 문서(HWP, PDF)를 자동으로 분석하여 적용 가능 �
 ```
 iroum-ax/
 ├── apps/
-│   ├── control-plane/      (SPEC-AX-CTRL-001 + SPEC-AX-EVID-001) [GO]
+│   ├── control-plane/      (SPEC-AX-CTRL-001 + SPEC-AX-EVID-001 + SPEC-AX-EVAL-ITEM-001) [GO]
 │   │   ├── cmd/server/
 │   │   ├── internal/
 │   │   │   ├── workflow/   (State Machine, Handlers)
-│   │   │   ├── store/      (PostgreSQL — workflows + evidences)
+│   │   │   ├── store/      (PostgreSQL — workflows + evidences + evaluation_items)
 │   │   │   ├── storage/    (EvidenceBlobStore, dbBlobStore)
 │   │   │   ├── scheduler/  (Celery Dispatcher)
 │   │   │   ├── audit/      (Audit Logging + Clock)
@@ -144,6 +145,7 @@ iroum-ax/
 | SPEC-AX-001 | v0.1.2 | PASSED | Python 파이프라인 (5 REQ + 5 REQ-UBI) |
 | SPEC-AX-CTRL-001 | v0.1.2 | PASSED | Go Control Plane (5 REQ + 2 REQ-UBI) |
 | SPEC-AX-EVID-001 | v0.1.0 | PASSED | 증빙 자료 수집/관리 (4 REQ + 4 REQ-UBI, coverage 91.4%) |
+| SPEC-AX-EVAL-ITEM-001 | v0.1.3 | PASSED | 평가항목 taxonomy Walking Skeleton (4 REQ + 4 REQ-UBI, coverage 86.2%, HTTP endpoint 없음) |
 | SPEC-AX-AUTH-001 | TBD | Deferred | 인증 + 멀티테넌트|
 | SPEC-AX-UI-001 | TBD | Deferred | TypeScript React 콘솔 |
 
@@ -154,6 +156,7 @@ iroum-ax/
 | `workflows` | SPEC-AX-CTRL-001 | 워크플로우 상태 관리 |
 | `audit_logs` | SPEC-AX-CTRL-001 | 감사 이벤트 기록 |
 | `evidences` | SPEC-AX-EVID-001 | 증빙 파일 (file_content BYTEA 포함), 버전 체인 |
+| `evaluation_items` | SPEC-AX-EVAL-ITEM-001 | 평가항목 taxonomy (Option A adjacency list, id VARCHAR(64) 계층 코드, parent_id self-FK ON DELETE RESTRICT) |
 | `documents` | SPEC-AX-001 | 정책 문서 (HWP/PDF) |
 
 ## 다음 단계

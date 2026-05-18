@@ -1,7 +1,7 @@
 ---
 id: SPEC-AX-EVAL-ITEM-001
 version: 0.1.3
-status: draft
+status: completed
 created: 2026-05-18
 updated: 2026-05-18
 author: ircp
@@ -244,3 +244,18 @@ Ubiquitous 요구사항은 SPEC-AX-001 / SPEC-AX-CTRL-001 / SPEC-AX-EVID-001의 
 - 회귀: 기존 WorkflowStore/EvidenceStore 특성화 테스트가 eval-item 와이어링 후에도 GREEN 유지
 
 상세 Given/When/Then 시나리오는 `acceptance.md`를 참조한다.
+
+---
+
+## Implementation Notes
+
+- **Run Phase 완료**: 2026-05-19 (Sync 기준); 구현 커밋 `fe53095` (2026-05-18)
+- **설계 결정**: Option A (자기참조 adjacency list 단일 테이블) + AUD-1 (deterministic UUIDv5 audit surrogate) — plan.md §6 RESOLVED 대로 실행
+- **M1 (UpdateEvalItem 리팩터)**: `validateStatusTransition` / `checkHierarchyMutationGuard` / `buildEvalItemUpdateSet` 3-헬퍼 분리 — 복잡도 ≥15 단일함수 회피, TRUST 5 Readable 준수
+- **M2 (@MX 태그)**: `eval_item.go` 내 `@MX:TODO` → `@MX:NOTE` 전환 완료 (GREEN 단계 완료 표시)
+- **errors.go**: 5개 eval-item sentinel 에러 추가적 합산 (기존 workflow/evidence sentinel 비변경) — `ErrEvalItemNotFound` / `ErrEvalItemInvalidInput` / `ErrEvalItemParentNotFound` / `ErrEvalItemHierarchyImmutable` / `ErrEvalItemInvalidStatus`
+- **커버리지**: `eval_item.go` 86.2% (목표 85%+ 충족)
+- **evaluator-active**: PASS — Functionality 96 / Security 95 / Craft 82 / Consistency 97
+- **plan-auditor**: PASS 0.955
+- **인수 기준**: 22개 AC 전체 GREEN
+- **이연 항목**: §5 Exclusion #6 (후속 SPEC 위임 사항) — HTTP endpoint / CRUD API / Console UI / `evidences` FK 하드닝 / 평가편람 import 포함, 본 SPEC 범위 외

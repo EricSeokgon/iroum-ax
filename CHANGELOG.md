@@ -7,6 +7,26 @@
 
 ## [Unreleased] - 2026-05-18
 
+### Added — SPEC-AX-EVAL-ITEM-001 v0.1.3 (경영평가 평가항목 taxonomy Walking Skeleton)
+
+- **평가항목 데이터 모델** (`evaluation_items` 테이블, `.moai/db/schema/migrations/0003_eval_item_tables.sql`): Option A 자기참조 adjacency list 단일 테이블. `id VARCHAR(64) PK` (계층 코드 형태, e.g. `AX-SAFETY-ORG-01`), `parent_id VARCHAR(64) REFERENCES evaluation_items(id) ON DELETE RESTRICT` (root = NULL), `hierarchy_code VARCHAR(128) NOT NULL UNIQUE`, `display_name VARCHAR(256) NOT NULL`, `level INT NOT NULL`, `status VARCHAR(32) DEFAULT 'ACTIVE'` CHECK(`ACTIVE`,`DEPRECATED`,`ARCHIVED`), `metadata JSONB`. 인덱스 3개 (`evaluation_items_parent_id_idx`, `evaluation_items_hierarchy_code_idx`, `evaluation_items_created_at_idx`). **단일 테이블 — 추가 테이블 없음.**
+- **EvalItemStore / EvalItemTx 계층** (`internal/store/store.go`, `internal/store/eval_item.go`): `EvalItemStore` 인터페이스 (`BeginEvalItemTx`) + `EvalItemTx` 인터페이스 (`InsertEvalItem`, `GetEvalItemByID`, `GetEvalItemsByParentID`, `UpdateEvalItem`, `InsertAuditLog`, `Commit`, `Rollback`). `PgEvalItemTx` 구현체 — `validateStatusTransition` / `checkHierarchyMutationGuard` / `buildEvalItemUpdateSet` 3-헬퍼 분리(M1 리팩터). `EvalItemUpdate`는 포인터 필드(`Status *string`, `Metadata *map[string]any`)로 부분 업데이트 지원.
+- **BeginEvalItemTx pool 재사용** (`internal/store/pg_store.go`): `PgWorkflowStore.pool` 단일 pgx 풀 재사용 — 신규 풀 연결 0건 (SPEC-AX-CTRL-001 / SPEC-AX-EVID-001 `BeginWorkflowTx` / `BeginEvidenceTx` 동일 패턴).
+- **감사 Recorder 확장** (`internal/audit/recorder.go`): `RecordEvalItemCreated` / `RecordEvalItemUpdated` 추가 — AUD-1 결정적 UUIDv5 surrogate: `resource_id = uuid.NewSHA1(EvalItemAuditNamespace, []byte(hierarchyCode))`. 실 식별자(`eval_item_id`, `hierarchy_code`, `parent_id`, `level`)는 `DetailsJSON`에 저장. `resource_id`는 원시 계층 코드가 아닌 UUIDv5.
+- **EvalItemAuditNamespace** (`internal/audit/audit.go`): `var EvalItemAuditNamespace = uuid.MustParse("a7f3c2e1-9b4d-5e6f-8a0b-1c2d3e4f5a6b")` — AUD-1 불변식 컴파일 타임 상수 (@MX:ANCHOR). `ActionEvalItemCreated = "EVAL_ITEM_CREATED"`, `ActionEvalItemUpdated = "EVAL_ITEM_UPDATED"` 액션 상수 추가.
+- **에러 센티널 5종** (`internal/errors/errors.go`): `ErrEvalItemNotFound`, `ErrEvalItemInvalidInput`, `ErrEvalItemParentNotFound`, `ErrEvalItemHierarchyImmutable`, `ErrEvalItemInvalidStatus` 추가적 합산 (기존 sentinel 비변경).
+- **Walking Skeleton 범위**: 데이터 모델 + store 계층 + audit 연계 — **HTTP 엔드포인트 없음, REST/gRPC 핸들러 없음, cmd/server 변경 없음.**
+- **커버리지**: `eval_item.go` 86.2% (목표 85%+ 충족); TDD RED-GREEN-REFACTOR 방법론
+- evaluator-active PASS — Functionality 96 / Security 95 / Craft 82 / Consistency 97; plan-auditor PASS 0.955
+
+### Deferred — SPEC-AX-EVAL-ITEM-001
+
+- HTTP CRUD 엔드포인트 / REST API — 후속 SPEC
+- Console UI / 평가편람 HWP·PDF import — 후속 SPEC
+- `evidences.evaluation_item_id` FK 하드닝 (EVID-001 코드 변경 포함) — 후속 SPEC
+
+---
+
 ### Added — SPEC-AX-EVID-001 v0.1.0 (경영평가 증빙 자료 수집/관리)
 
 - **증빙 데이터 모델** (`evidences` 테이블, `.moai/db/schema/migrations/0002_evidence_tables.sql`): `id UUID PK`, `evaluation_item_id VARCHAR(64)` (FK 제약 없음), `version INT`, `previous_version_id UUID` 자기 참조, `file_content BYTEA` (database_blob 전략 시 바이너리 저장 컬럼), `storage_location VARCHAR(255)`, `storage_strategy VARCHAR(32)`, `file_hash_sha256`, `created_by DEFAULT 'cli-anonymous'` 등. 인덱스 2개 (`evidences_eval_item_version_idx`, `evidences_created_at_idx`).
