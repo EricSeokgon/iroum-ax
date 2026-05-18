@@ -1,6 +1,6 @@
 ---
 id: SPEC-AX-EVID-001
-version: 0.1.1
+version: 0.1.2
 status: draft
 created: 2026-05-18
 updated: 2026-05-18
@@ -11,6 +11,7 @@ issue_number: 0
 
 # HISTORY
 
+- 0.1.2 (2026-05-18): Run Phase 1 전략 승인 반영 (manager-strategy 분석 strategy.md + 사용자 Human Gate 승인). (1) 저장 전략 OPEN DECISION → **RESOLVED: `database_blob`** 확정 (§3.5 REQ-EVID-004, plan.md §6; 가중 8.45 vs filesystem 5.45 vs MinIO 3.85, 동일 TX 원자성 구조적 보장 + orphan-cleanup 제거 + 망분리 외부 의존 0건; 추상화·enum 유지로 post-PoC 무중단 전환 대비). (2) DDL/엔티티에 `file_content BYTEA` (nullable) 컬럼 추가 (§3.2, plan.md §3 — database_blob 시 바이너리 저장처, 타 전략 NULL). (3) Phantom-path 교정: evidence TX 진입점 `postgres.go`(Sprint-0 死 스텁) → `pg_store.go`(실 `PgWorkflowStore.pool`) (§2.1, plan.md §2). (4) EvidenceBlobStore 정합: database_blob 시 blob bytes는 인터페이스 미통과, `EvidenceTx.InsertEvidence(file_content)` 경로로 동일 TX 저장, 인터페이스는 논리 location 기록만 (§3.5 REQ-EVID-004-O1). (5) config 기본값 명시 (§4: `EVIDENCE_STORAGE_STRATEGY=database_blob`, `EVIDENCE_MAX_FILE_BYTES=52428800`, `EVIDENCE_DUPLICATE_SIGNAL_ENABLED=false`). (작성자: ircp)
 - 0.1.1 (2026-05-18): plan-auditor iter 1 리뷰 반영 (PASS 0.88, minor 결함 2건 + cosmetic 정정). D1(REQ-EVID-001-O1 coverage gap 해소 — acceptance.md에 전용 AC-EVID-001-O1-1 추가, §6 catalog의 AC-EVID-001-1 오매핑 정정, Total AC 18→19, spec-compact.md 동기화). D2(spec.md §2.2 / plan.md §8 DB schema 경로 표현 불일치 해소 — research.md §2 규약대로 `.moai/db/schema/initial.sql`=참조 스키마, `.moai/db/schema/migrations/NNNN_*.sql`=마이그레이션으로 통일, `0002_evidence_tables.sql` 파일번호 비충돌 무조건 확정 — migrations/에 `0001_initial.sql`만 실재 확인). Cosmetic(§3.1 `REQ-UBI-NNN`→도메인 스코프 `REQ-EVID-UBI-NNN` 표현 정정, acceptance.md §6 immutability edge의 R-EVID-002 risk-ID 재사용 → REQ-EVID-UBI-004 불변식 참조로 교체). (작성자: ircp)
 - 0.1.0 (2026-05-18): 경영평가 증빙 자료 수집/관리(Evidence Management) 첫 초안. iroum-ax Go control-plane을 brownfield 확장하여 증빙 문서 데이터 모델 + store 계층 + audit 연계 Walking Skeleton 정의. 재업로드 버전 체이닝(`previous_version_id`), 평가항목 ID 경량 stub(FK 제약 없음), 저장 전략 추상화(filesystem/DB BLOB/self-hosted MinIO 후보 — 선택은 run/strategy 단계로 이연). 평가항목 taxonomy, 전체 업로드 UI, 저장 전략 최종 선택은 의도적 제외. SPEC-AX-CTRL-001의 WorkflowStore/WorkflowTx/AuditRecorder 패턴(GREEN 가정) 위에 EvidenceStore/EvidenceTx/Recorder 확장 메서드를 동일 패턴으로 추가. (작성자: ircp)
 
@@ -60,7 +61,7 @@ issue_number: 0
 |------|------|-------|------|
 | `apps/control-plane/internal/store/store.go` | `EvidenceStore` / `EvidenceTx` 인터페이스 추가 (기존 `WorkflowStore`/`WorkflowTx` 패턴 준수) | [MODIFY] | REQ-EVID-001 |
 | `apps/control-plane/internal/store/evidence.go` | `EvidenceTx` 메서드 (InsertEvidence, GetEvidenceByID, GetLatestVersionByEvalItem, ListEvidenceByEvalItem) pgx 구현 | [NEW] | REQ-EVID-001, REQ-EVID-002 |
-| `apps/control-plane/internal/store/postgres.go` | 기존 pgx pool에 evidence 트랜잭션 진입점 와이어링 (신규 풀 금지, 단일 pool 재사용) | [MODIFY] | REQ-EVID-001 |
+| `apps/control-plane/internal/store/pg_store.go` | 실 pgx pool(`PgWorkflowStore{pool *pgxpool.Pool}`, `server.go:86` `store.NewPgWorkflowStore(...)` 와이어링)에 evidence 트랜잭션 진입점 추가 (신규 풀 금지, `PgWorkflowStore.pool` 단일 재사용). **주의: `postgres.go`는 Sprint-0 死 스텁(`New(cfg)` + TODO Sprint 7, 실 pool 없음)이며 본 SPEC 대상 아님** — strategy.md §0 phantom-path 교정 | [MODIFY] | REQ-EVID-001 |
 | `apps/control-plane/internal/audit/audit.go` | 신규 액션 상수 `ActionEvidenceCreated`, `ActionEvidenceVersioned` 추가 (기존 `Action string` 패턴) | [MODIFY] | REQ-EVID-003 |
 | `apps/control-plane/internal/audit/recorder.go` | `RecordEvidenceCreated`, `RecordEvidenceVersioned` 메서드 추가 (기존 `RecordCreated` 시그니처 패턴, 로컬 `AuditTx` 인터페이스 유지) | [MODIFY] | REQ-EVID-003 |
 | `apps/control-plane/internal/storage/storage.go` | `EvidenceBlobStore` 저장 전략 인터페이스 정의 (구현체 없음 — 전략 미선택) | [NEW] | REQ-EVID-004 |
@@ -98,7 +99,7 @@ Ubiquitous 요구사항은 SPEC-AX-001 / SPEC-AX-CTRL-001의 canonical `REQ-UBI-
 
 ### 3.2 REQ-EVID-001 — 증빙 데이터 모델 & Store 계층
 
-**엔티티**: `evidences` (id UUID PK, evaluation_item_id VARCHAR(64) — FK 제약 없음, version INT, previous_version_id UUID 자기 참조, file_name, file_size_bytes, file_hash_sha256, content_type, storage_location, storage_strategy, status, metadata JSONB, created_at, created_by DEFAULT 'cli-anonymous', updated_at, archived_at). 구체 DDL은 `plan.md` §3 참조.
+**엔티티**: `evidences` (id UUID PK, evaluation_item_id VARCHAR(64) — FK 제약 없음, version INT, previous_version_id UUID 자기 참조, file_name, file_size_bytes, file_hash_sha256, content_type, `file_content BYTEA` (nullable — DB BLOB 바이너리 저장처), storage_location, storage_strategy, status, metadata JSONB, created_at, created_by DEFAULT 'cli-anonymous', updated_at, archived_at). `file_content`는 `storage_strategy='database_blob'`일 때 바이너리가 저장되는 컬럼(해당 전략에서는 NOT NULL 의미)이며, 다른 전략(`filesystem`/`minio`)에서는 NULL이고 바이너리는 `storage_location`이 가리키는 외부 위치에 저장된다. 구체 DDL은 `plan.md` §3 참조.
 
 **Store 추상화**: `EvidenceStore.BeginTx(ctx) (EvidenceTx, error)` + `EvidenceTx{InsertEvidence, GetEvidenceByID, GetLatestVersionByEvalItem, ListEvidenceByEvalItem, InsertAuditLog, Commit, Rollback}` — 기존 `WorkflowStore`/`WorkflowTx` 인터페이스 설계를 그대로 미러링하며 동일 pgx pool을 재사용한다.
 
@@ -146,19 +147,21 @@ Ubiquitous 요구사항은 SPEC-AX-001 / SPEC-AX-CTRL-001의 canonical `REQ-UBI-
 
 ### 3.5 REQ-EVID-004 — 저장 전략 추상화 (Storage Strategy Abstraction)
 
-파일 바이너리의 물리적 저장 백엔드 결정은 **본 SPEC 범위가 아니다** (run/strategy 단계 OPEN DECISION — `plan.md` §6 트레이드오프 표 참조). 본 SPEC은 추상화와 데이터 주권 제약만 정의한다.
+> **RESOLVED: `database_blob` (PostgreSQL BYTEA)** — Run Phase 1 manager-strategy 분석 + 사용자 승인 (strategy.md §2, Human Gate Decision Point 1). 근거 요약: 증빙 행 + `audit_logs` 행 + 파일 바이너리(`file_content BYTEA`)를 **동일 pgx 트랜잭션**에 포함시켜 REQ-EVID-UBI-002 / REQ-EVID-003-U1 원자성(all-or-nothing)을 구조적으로 보장하고, 별도 orphan-cleanup 메커니즘을 제거하며, 망분리 외부 의존 0건(이미 내부망인 PostgreSQL만 사용)을 by-construction으로 충족. 가중 트레이드오프 점수 DB BLOB **8.45** vs filesystem 5.45 vs self-hosted MinIO 3.85 (strategy.md §2.2). PoC 단일 노드 + 50 MiB 상한 + p99<150ms 측정 경로에서 blob latency 제외(§4)로 알려진 DB BLOB 약점(WAL/테이블 비대화)의 영향 범위가 한정됨.
+>
+> **추상화 유지(post-PoC 무중단 전환 대비)**: `database_blob` 확정 후에도 `storage_strategy` enum의 `filesystem`/`minio` 값과 `EvidenceBlobStore` 인터페이스 추상화는 그대로 유지한다. PoC 중 DB 비대화가 실측 문제로 드러나면 `storage_strategy` 값 + 새 `EvidenceBlobStore` 구현체 추가만으로 schema 변경 없이 filesystem으로 전환 가능 (strategy.md §2.4/§2.5).
 
 #### State-driven
 
-- **REQ-EVID-004-S1**: WHILE any evidence row is persisted, its `storage_strategy` column SHALL hold exactly one value from the enumerated set `{'filesystem', 'database_blob', 'minio'}`. 어떤 row도 NULL 또는 열거되지 않은 전략 값을 가질 수 없다 (CHECK 제약 또는 store 계층 검증). 실제 선택된 전략은 환경설정(`EVIDENCE_STORAGE_STRATEGY`)에서 주입되며 본 SPEC은 기본값을 강제하지 않는다.
+- **REQ-EVID-004-S1**: WHILE any evidence row is persisted, its `storage_strategy` column SHALL hold exactly one value from the enumerated set `{'filesystem', 'database_blob', 'minio'}`. 어떤 row도 NULL 또는 열거되지 않은 전략 값을 가질 수 없다 (CHECK 제약 + store 계층 검증). 실제 선택된 전략은 환경설정(`EVIDENCE_STORAGE_STRATEGY`, **기본값 `database_blob`** — Run Phase 1 확정)에서 주입되며 config 로드 시 enum 검증(fail-fast, SPEC-AX-CTRL-001 startup 패턴 정합)한다.
 
 #### Optional
 
-- **REQ-EVID-004-O1**: WHERE the `EvidenceBlobStore` interface is defined, the subsystem SHALL expose it as a strategy-swappable abstraction (`Put(ctx, key, reader) (location string, error)`, `Get(ctx, location) (reader, error)`) with NO concrete implementation shipped in this SPEC. 구현체는 전략 결정 후 별도 작업에서 추가된다.
+- **REQ-EVID-004-O1**: WHERE the `EvidenceBlobStore` interface is defined, the subsystem SHALL expose it as a strategy-swappable abstraction (`Put(ctx, key, reader) (location string, error)`, `Get(ctx, location) (reader, error)`). `database_blob` 전략의 PoC 구현체는 논리 location 문자열(예: `db://evidences/<id>`)을 반환·기록하는 역할만 수행하며, **실제 blob 바이너리는 `EvidenceBlobStore` 인터페이스를 통과하지 않고 `EvidenceTx.InsertEvidence(..., file_content)` 경로로 동일 pgx 트랜잭션에 저장된다** (단일 TX 원자성 보존 — strategy.md §2.6.5 option 6a, Human Gate 승인). 이로써 추상화 계약(전략 교체 가능, 외부 SDK 0건)과 동일 TX 원자성을 동시에 충족한다. 다른 전략(filesystem/minio) 구현체는 전략 전환 시 별도 작업에서 추가된다.
 
 #### Unwanted
 
-- **REQ-EVID-004-U1**: IF a future storage strategy implementation issues a network call to a host outside the customer internal network (외부 S3 endpoint, 외부 CDN, 공용 인터넷 DNS 해석), THEN that strategy SHALL be considered non-compliant and SHALL NOT be adopted (REQ-EVID-UBI-001 강제 — self-hosted MinIO는 내부망 배포 시에만 후보, 외부 관리형 S3는 영구 부적격).
+- **REQ-EVID-004-U1**: IF a storage strategy implementation issues a network call to a host outside the customer internal network (외부 S3 endpoint, 외부 CDN, 공용 인터넷 DNS 해석), THEN that strategy SHALL be considered non-compliant and SHALL NOT be adopted (REQ-EVID-UBI-001 강제). 확정된 `database_blob` 전략은 이미 내부망인 PostgreSQL pgx pool만 사용하므로 by-construction으로 본 제약을 충족한다. 외부 관리형 S3는 영구 부적격이며, self-hosted MinIO는 내부망 배포 시에만 후보(post-PoC 재검토 대상).
 
 ---
 
@@ -171,8 +174,10 @@ Ubiquitous 요구사항은 SPEC-AX-001 / SPEC-AX-CTRL-001의 canonical `REQ-UBI-
 | 버전 무결성 | 이전 버전 행 byte-identical 보존, 물리 삭제 0건, version 번호 gap/중복 0건 | §3.1 REQ-EVID-UBI-004, §3.3 |
 | 성능 — 증빙 생성 | p99 < 150ms (SHA-256 해시 + 단일 TX INSERT, 50 MiB 이하 파일, 파일 바이너리 물리 저장 latency 제외) | §3.2 REQ-EVID-001-E1 |
 | 동시성 | 동일 `evaluation_item_id` 동시 버전 생성 시 `SELECT FOR UPDATE`로 직렬화 | §3.2 REQ-EVID-001-S1 |
-| 자원 한계 | 단일 파일 ≤ `EVIDENCE_MAX_FILE_BYTES` (default 50 MiB), 초과 시 TX 진입 전 거부 | §3.2 REQ-EVID-001-U1 |
-| pgx pool 재사용 | 기존 SPEC-AX-CTRL-001 단일 pgx pool 재사용, 신규 풀 생성 금지 | research.md §8 Risk 6 |
+| 자원 한계 | 단일 파일 ≤ `EVIDENCE_MAX_FILE_BYTES` (default `52428800` = 50 MiB), 초과 시 TX 진입 전 거부 | §3.2 REQ-EVID-001-U1 |
+| 저장 전략 (확정) | `EVIDENCE_STORAGE_STRATEGY` default `database_blob` (Run Phase 1 확정, strategy.md §2.3), config 로드 시 enum 검증 fail-fast | §3.5 REQ-EVID-004-S1 |
+| Config 기본값 | `EVIDENCE_STORAGE_STRATEGY=database_blob`, `EVIDENCE_MAX_FILE_BYTES=52428800` (50 MiB), `EVIDENCE_DUPLICATE_SIGNAL_ENABLED=false` (Sandbox PoC 비활성) — `internal/config/config.go` `getEnv`/`getBoolEnv` 추가 | strategy.md §2.6.2 |
+| pgx pool 재사용 | 기존 SPEC-AX-CTRL-001 단일 pgx pool(`PgWorkflowStore.pool`, `pg_store.go`) 재사용, 신규 풀 생성 금지. `postgres.go` 死 스텁 비대상 | research.md §8 Risk 6, strategy.md §0 |
 | 로깅 | 구조화 JSON 로그(zap), 거부는 INFO, 서버 결함은 ERROR | `tech.md` §8.2 |
 | 테스트 커버리지 | >= 85% (`quality.yaml` test_coverage_target) | `quality.yaml` |
 | 개발 방법론 | TDD (RED-GREEN-REFACTOR) | `quality.yaml` development_mode |
@@ -186,7 +191,7 @@ Ubiquitous 요구사항은 SPEC-AX-001 / SPEC-AX-CTRL-001의 canonical `REQ-UBI-
 
 1. **평가항목 taxonomy / `evaluation_items` 테이블** — `evidences.evaluation_item_id`는 FK 제약 없는 `VARCHAR(64)` stub. 항목→지표→배점 계층 구조, 평가편람 파싱 연계, evaluation-item CRUD 일체 제외. [Deferred to future SPEC-AX-EVAL-ITEM-001 (아직 미생성, named placeholder)]
 2. **전체 업로드 UI / UX** — Console(`apps/console/`)의 멀티파트 업로드 폼, 드래그앤드롭, 진행률 표시기, 썸네일/미리보기, 파일 브라우저 일체 제외. 본 SPEC은 데이터 모델 + store + 단일 생성 엔드포인트만 다룬다.
-3. **저장 전략 최종 선택** — filesystem / DB BLOB / self-hosted MinIO 중 어느 것도 본 SPEC에서 선택하지 않는다. 추상화(`EvidenceBlobStore` 인터페이스)와 `storage_strategy` 컬럼만 정의. 구체 구현체 0개. [Deferred to run/strategy phase — `plan.md` §6 OPEN DECISION]
+3. **대체 저장 백엔드 구현 (filesystem / self-hosted MinIO)** — 저장 전략은 Run Phase 1에서 `database_blob`로 확정(§3.5 RESOLVED, `plan.md` §6)되었으며 본 SPEC은 `database_blob` 구현체(`file_content BYTEA` + `dbBlobStore`)만 빌드한다. filesystem 디렉토리 레이아웃, self-hosted MinIO 클라이언트 통합 등 **대체 전략 구현체는 본 SPEC 범위 밖**(추상화·`storage_strategy` enum은 post-PoC 전환 대비 유지하되 구현은 전환 결정 시 별도 작업).
 4. **인증 / 인가 / 증빙 권한 모델** — 모든 호출은 `created_by='cli-anonymous'`. JWT, RBAC `write:evidence` 권한 등록, 조직 격리는 SPEC-AX-AUTH 계열(기존/미래)에서 처리. 본 SPEC은 audit user_id 기본값 계약만 준수.
 5. **증빙 삭제 / 보존 정책 (retention)** — 증빙 hard delete API, 법정 보존 기간 관리, archival/cold storage 이전, GDPR/PIPA 파기 요청 처리 일체 제외. `archived_at` 컬럼은 미래 확장용 placeholder로만 정의(본 SPEC에서 set하지 않음).
 6. **증빙 ↔ 보고서/워크플로우 연계** — 증빙을 특정 `workflow_id` 또는 생성된 보고서 섹션에 바인딩하는 관계 모델 제외. 본 SPEC은 `evaluation_item_id` 귀속만 다룬다.
@@ -212,7 +217,7 @@ Ubiquitous 요구사항은 SPEC-AX-001 / SPEC-AX-CTRL-001의 canonical `REQ-UBI-
 본 SPEC을 받은 구현자가 혼동할 수 있는 인접 영역:
 
 - **평가항목 taxonomy 시스템**: `evaluation_item_id`가 가리키는 평가항목 정의·계층·배점은 본 SPEC 범위 밖이며 참조 테이블도 만들지 않는다. 미래 `SPEC-AX-EVAL-ITEM-001`(미생성) 후보.
-- **저장 백엔드 구현**: filesystem 디렉토리 레이아웃, DB BLOB 컬럼 추가, MinIO 클라이언트 통합 — 어느 것도 구현하지 않는다. 추상화만 정의하며 결정은 `plan.md` §6 OPEN DECISION으로 이연.
+- **대체 저장 백엔드 구현**: 저장 전략은 `database_blob`로 확정(§3.5 RESOLVED). 본 SPEC은 `database_blob`(`file_content BYTEA`)만 구현하며, filesystem 디렉토리 레이아웃·MinIO 클라이언트 통합 등 대체 전략 구현체는 범위 밖(추상화·enum은 전환 대비 유지).
 - **Console 업로드 화면**: `apps/console/app/documents/`는 본 SPEC과 무관.
 - **증빙 파일 내용 분석**: OCR/파싱/RAG는 Python pipelines 책임.
 - **증빙 권한/조직 격리**: SPEC-AX-AUTH 계열 책임. 본 SPEC은 cli-anonymous 기본값만.

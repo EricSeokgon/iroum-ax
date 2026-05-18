@@ -9,8 +9,12 @@ import (
 )
 
 func main() {
-	// 설정 로드 (환경 변수 기반 12팩터 방식)
-	cfg := config.Load()
+	// 설정 로드 + 검증 (EVIDENCE_STORAGE_STRATEGY 등 fail-fast — DC-017-gap)
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		// config 검증 실패는 복구 불가능한 오류 (startup fail-fast)
+		panic("config 검증 실패: " + err.Error())
+	}
 
 	// 환경별 구조화 로거 초기화
 	logger, err := log.New(cfg.Env)

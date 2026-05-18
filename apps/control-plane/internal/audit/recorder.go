@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,15 +37,43 @@ type AuditTx interface {
 // @MX:ANCHOR: [AUTO] 8종 감사 액션 기록의 단일 진입점 (fan_in: gRPC 핸들러, 워크플로우 핸들러, callback)
 // @MX:REASON: REQ-CTRL-UBI-002 AC-UBI-002-A/B/C 모두 이 Recorder를 통해 검증
 type Recorder struct {
+	// clock 시각 제공자 — 증빙 감사 경로 테스트 친화 (R-EVID-007/T-018)
+	// nil이면 defaultClock(systemClock) 사용 — 기존 time.Now().UTC()와 동일 동작
+	clock Clock
 	// authEnabled false이면 user_id를 DefaultUserID로 강제
 	// Walking Skeleton 기본값: false (SPEC §5 Exclusion §2)
 	authEnabled bool
 }
 
+// RecorderOption Recorder 생성 시 선택적 의존성 주입 (기능 옵션 패턴)
+type RecorderOption func(*Recorder)
+
+// WithClock 테스트에서 고정 시각 Clock을 주입 (R-EVID-007 — 증빙 감사 시각 검증)
+func WithClock(c Clock) RecorderOption {
+	return func(r *Recorder) { r.clock = c }
+}
+
 // NewRecorder 새 Recorder 인스턴스를 생성
 // authEnabled: 인증 활성화 여부 (config.Config.AuthEnabled 값 전달)
-func NewRecorder(authEnabled bool) *Recorder {
-	return &Recorder{authEnabled: authEnabled}
+// opts: 선택적 의존성 (WithClock 등) — 미지정 시 기존 동작과 byte-identical
+func NewRecorder(authEnabled bool, opts ...RecorderOption) *Recorder {
+	r := &Recorder{authEnabled: authEnabled, clock: defaultClock}
+	for _, o := range opts {
+		o(r)
+	}
+	if r.clock == nil {
+		r.clock = defaultClock
+	}
+	return r
+}
+
+// nowUTC Recorder의 주입된 Clock에서 현재 UTC 시각을 반환
+// 증빙 감사 메서드 전용 — 기존 워크플로우 메서드는 직접 time.Now().UTC() 유지 (scope 최소화)
+func (r *Recorder) nowUTC() time.Time {
+	if r.clock == nil {
+		return time.Now().UTC()
+	}
+	return r.clock.NowUTC()
 }
 
 // resolveUserID 요청에서 전달된 userID를 반환하거나,
@@ -206,6 +235,59 @@ func (r *Recorder) RecordCreateCancelled(ctx context.Context, tx AuditTx, workfl
 		ResourceType: "workflow",
 		ResourceID:   parseResourceID(workflowID),
 		UserID:       r.resolveUserID(userID),
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordEvidenceCreated EVIDENCE_CREATED 감사 이벤트를 기록 (SPEC-AX-EVID-001)
+// 신규 증빙(version=1) 생성과 동일 AuditTx에 audit_logs 1건 (REQ-EVID-UBI-002 / REQ-EVID-003-E1)
+// details JSONB: {evaluation_item_id, version, file_hash_sha256} (previous_version_id 없음)
+//
+// @MX:ANCHOR: [AUTO] 증빙 생성 감사 단일 진입점 — REQ-EVID-UBI-002-A AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — 증빙 감사 완결성 계약
+func (r *Recorder) RecordEvidenceCreated(ctx context.Context, tx AuditTx, evidenceID, evalItemID, fileHashSHA256 string, version int, userID string) error {
+	details, err := json.Marshal(map[string]string{
+		"evaluation_item_id": evalItemID,
+		"version":            strconv.Itoa(version),
+		"file_hash_sha256":   fileHashSHA256,
+	})
+	if err != nil {
+		return fmt.Errorf("recorder: marshal evidence created details: %w", err)
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionEvidenceCreated,
+		ResourceType: "evidence",
+		ResourceID:   parseResourceID(evidenceID),
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordEvidenceVersioned EVIDENCE_VERSIONED 감사 이벤트를 기록 (SPEC-AX-EVID-001)
+// 기존 증빙 재업로드(version+1)와 동일 AuditTx에 audit_logs 1건 (REQ-EVID-UBI-002 / REQ-EVID-003-E1)
+// details JSONB: {evaluation_item_id, version, file_hash_sha256, previous_version_id}
+//
+// @MX:ANCHOR: [AUTO] 증빙 버전 감사 단일 진입점 — REQ-EVID-UBI-002-B AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — 버전 감사 완결성 계약
+func (r *Recorder) RecordEvidenceVersioned(ctx context.Context, tx AuditTx, evidenceID, evalItemID, fileHashSHA256 string, version int, previousVersionID, userID string) error {
+	details, err := json.Marshal(map[string]string{
+		"evaluation_item_id":  evalItemID,
+		"version":             strconv.Itoa(version),
+		"file_hash_sha256":    fileHashSHA256,
+		"previous_version_id": previousVersionID,
+	})
+	if err != nil {
+		return fmt.Errorf("recorder: marshal evidence versioned details: %w", err)
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionEvidenceVersioned,
+		ResourceType: "evidence",
+		ResourceID:   parseResourceID(evidenceID),
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
 	}
 	return tx.InsertAuditLog(ctx, e)
 }

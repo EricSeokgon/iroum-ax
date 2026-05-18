@@ -3,6 +3,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 )
@@ -44,8 +45,18 @@ type Config struct {
 	// CeleryQueue Celery 태스크 큐 이름
 	// 환경 변수: CELERY_QUEUE
 	// 기본값: celery
-	// 필드 순서: string 블록 끝에 배치하여 fieldalignment 최적화
 	CeleryQueue string
+
+	// EvidenceStorageStrategy 증빙 저장 전략 (SPEC-AX-EVID-001)
+	// 환경 변수: EVIDENCE_STORAGE_STRATEGY
+	// 기본값: database_blob (Run Phase 1 확정). 열거 {filesystem,database_blob,minio} 검증 fail-fast
+	// 필드 순서: string 블록 끝에 배치하여 fieldalignment 최적화
+	EvidenceStorageStrategy string
+
+	// EvidenceMaxFileBytes 증빙 파일 최대 바이트 (pre-TX 거부 임계 — REQ-EVID-001-U1)
+	// 환경 변수: EVIDENCE_MAX_FILE_BYTES
+	// 기본값: 52428800 (50 MiB). int64 블록 — int64(8B)
+	EvidenceMaxFileBytes int64
 
 	// JWKSCacheTTLSeconds — JWKS 캐시 hard TTL (초 단위)
 	// 환경 변수: JWKS_CACHE_TTL_SECONDS
@@ -76,6 +87,18 @@ type Config struct {
 	// 환경 변수: AUTH_ENABLED (true/false)
 	// 기본값: false (로컬 개발 편의성, backward compat)
 	AuthEnabled bool
+
+	// EvidenceDuplicateSignalEnabled 중복 SHA-256 비차단 신호 활성화 (REQ-EVID-001-O1 Optional)
+	// 환경 변수: EVIDENCE_DUPLICATE_SIGNAL_ENABLED (true/false)
+	// 기본값: false (Sandbox PoC 비활성)
+	EvidenceDuplicateSignalEnabled bool
+}
+
+// validEvidenceStrategies 허용된 storage_strategy 열거값 (DDL CHECK 제약과 정합)
+var validEvidenceStrategies = map[string]struct{}{
+	"filesystem":    {},
+	"database_blob": {},
+	"minio":         {},
 }
 
 // Load 환경 변수에서 Config를 로드하여 반환
@@ -96,7 +119,32 @@ func Load() *Config {
 		ShutdownTimeoutSeconds:   getIntEnv("SHUTDOWN_TIMEOUT_SECONDS", 30),
 		ReadyProbeTimeoutSeconds: getIntEnv("READY_PROBE_TIMEOUT_SECONDS", 5),
 		AuthEnabled:              getBoolEnv("AUTH_ENABLED", false),
+
+		EvidenceStorageStrategy:        getEnv("EVIDENCE_STORAGE_STRATEGY", "database_blob"),
+		EvidenceMaxFileBytes:           getInt64Env("EVIDENCE_MAX_FILE_BYTES", 52428800),
+		EvidenceDuplicateSignalEnabled: getBoolEnv("EVIDENCE_DUPLICATE_SIGNAL_ENABLED", false),
 	}
+}
+
+// Validate 설정 무결성을 검증한다 — 잘못된 값은 startup fail-fast (panic 금지)
+// SPEC-AX-EVID-001 DC-017-gap/E-09: EVIDENCE_STORAGE_STRATEGY 열거 검증
+func (c *Config) Validate() error {
+	if _, ok := validEvidenceStrategies[c.EvidenceStorageStrategy]; !ok {
+		return fmt.Errorf("EVIDENCE_STORAGE_STRATEGY 잘못된 값 %q (허용: filesystem|database_blob|minio)",
+			c.EvidenceStorageStrategy)
+	}
+	return nil
+}
+
+// LoadConfig Load() + Validate()를 결합하여 검증된 Config를 반환
+// 검증 실패 시 nil, error를 반환하여 호출자(main.go)가 fail-fast 종료한다.
+// 기존 Load()는 backward-compat을 위해 시그니처/동작 불변 유지 (T-001 회귀).
+func LoadConfig() (*Config, error) {
+	cfg := Load()
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("config 검증 실패: %w", err)
+	}
+	return cfg, nil
 }
 
 // getEnv 환경 변수 값을 반환하고, 없으면 기본값을 반환
@@ -129,6 +177,20 @@ func getIntEnv(key string, defaultVal int) int {
 		return defaultVal
 	}
 	parsed, err := strconv.Atoi(v)
+	if err != nil {
+		return defaultVal
+	}
+	return parsed
+}
+
+// getInt64Env 환경 변수를 int64로 파싱하여 반환
+// 파싱 실패 시 기본값을 반환 (EVIDENCE_MAX_FILE_BYTES 등 대용량 임계값용)
+func getInt64Env(key string, defaultVal int64) int64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
+	}
+	parsed, err := strconv.ParseInt(v, 10, 64)
 	if err != nil {
 		return defaultVal
 	}

@@ -51,6 +51,13 @@ const (
 	// ActionServerShutdownCompleted 모든 리스너 드레인 + 커넥션 종료 후 기록
 	// REQ-SERVER-UBI-001-a: uptime_seconds, exit_reason 기록
 	ActionServerShutdownCompleted Action = "SERVER_SHUTDOWN_COMPLETED"
+
+	// ActionEvidenceCreated 신규 증빙(version=1) 생성 시 기록
+	// SPEC-AX-EVID-001 REQ-EVID-003-E1: 증빙 생성과 동일 TX에 audit_logs 1건
+	ActionEvidenceCreated Action = "EVIDENCE_CREATED"
+	// ActionEvidenceVersioned 기존 증빙 재업로드(version+1) 시 기록
+	// SPEC-AX-EVID-001 REQ-EVID-003-E1: 버전 이벤트와 동일 TX에 audit_logs 1건
+	ActionEvidenceVersioned Action = "EVIDENCE_VERSIONED"
 )
 
 // Event 감사 로그 이벤트 엔티티

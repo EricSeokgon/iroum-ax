@@ -45,9 +45,40 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 -- ============================================================
+-- 증빙 테이블 (SPEC-AX-EVID-001 — migrations/0002_evidence_tables.sql 미러)
+-- 통합 테스트에서 evaluation_item_id FK 없이 임의 문자열 삽입 허용 (AC-EVID-001-3)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS evidences (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    evaluation_item_id  VARCHAR(64) NOT NULL,
+    version             INT NOT NULL DEFAULT 1,
+    previous_version_id UUID REFERENCES evidences(id) ON DELETE RESTRICT,
+    file_name           VARCHAR(512) NOT NULL,
+    file_size_bytes     BIGINT,
+    file_hash_sha256    VARCHAR(64),
+    content_type        VARCHAR(128),
+    file_content        BYTEA,
+    storage_location    VARCHAR(255),
+    storage_strategy    VARCHAR(32) NOT NULL DEFAULT 'database_blob',
+    status              VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+    metadata            JSONB,
+    created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    created_by          VARCHAR(64) NOT NULL DEFAULT 'cli-anonymous',
+    updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    archived_at         TIMESTAMP WITH TIME ZONE
+);
+
+DO $$ BEGIN
+    ALTER TABLE evidences ADD CONSTRAINT evidences_storage_strategy_chk
+        CHECK (storage_strategy IN ('filesystem','database_blob','minio'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ============================================================
 -- 인덱스 정의
 -- ============================================================
 CREATE INDEX IF NOT EXISTS workflows_status_idx ON workflows (status);
 CREATE INDEX IF NOT EXISTS workflows_document_id_idx ON workflows (document_id);
 CREATE INDEX IF NOT EXISTS audit_logs_resource_idx ON audit_logs (resource_type, resource_id);
 CREATE INDEX IF NOT EXISTS audit_logs_user_id_timestamp_idx ON audit_logs (user_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS evidences_eval_item_version_idx ON evidences (evaluation_item_id, version DESC);
+CREATE INDEX IF NOT EXISTS evidences_created_at_idx ON evidences (created_at DESC);

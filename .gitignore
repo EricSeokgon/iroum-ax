@@ -19,6 +19,7 @@ apps/control-plane/cmd/server/server
 *.dylib
 cover.out
 coverage.out
+cov*.out
 cover.html
 cpu.prof
 mem.prof

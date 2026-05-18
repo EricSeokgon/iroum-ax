@@ -27,6 +27,7 @@ import (
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/proto"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/scheduler"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/server"
+	"github.com/ircp/iroum-ax/apps/control-plane/internal/storage"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/store"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/workflow"
 )
@@ -50,6 +51,7 @@ type Server struct {
 	cfg            *config.Config
 	pgStore        *store.PgWorkflowStore
 	restHandler    *server.RESTHandler
+	evidenceH      *EvidenceHandler
 	dispatcher     *scheduler.CeleryDispatcher
 	grpcServer     *grpc.Server
 	httpServer     *http.Server
@@ -190,6 +192,17 @@ func New(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Server, 
 	restHandler := server.NewRESTHandler(workflowSvc, logger)
 	s.restHandler = restHandler
 
+	// 단계 (i-1): 증빙 핸들러 (SPEC-AX-EVID-001) — pgStore가 EvidenceStore 구현
+	// database_blob 전략: blobStore는 논리 location만 기록 (bytes는 EvidenceTx 경유)
+	s.evidenceH = NewEvidenceHandler(
+		pgStore,
+		rec,
+		storage.NewDBBlobStore(),
+		logger,
+		cfg.EvidenceMaxFileBytes,
+		cfg.EvidenceDuplicateSignalEnabled,
+	)
+
 	return s, nil
 }
 
@@ -237,8 +250,15 @@ func (s *Server) Run(ctx context.Context) error {
 	// recorder=nil: audit.Recorder가 auth.auditRecorder 인터페이스를 아직 구현하지 않음 (S2 TODO);
 	// REQ-ABAC-007 recorder=nil이면 ABAC 감사 기록 skip. DefaultABACPolicies는 빈 집합 → 완전 no-op.
 	abacEvaluator := auth.NewABACEvaluator(auth.DefaultABACPolicies(), nil)
+
+	// 내부 라우터: 증빙 엔드포인트(/api/v1/evidences)는 evidenceH, 나머지는 restHandler
+	// (SPEC-AX-EVID-001 GAP-01 — POST /api/v1/evidences 라우트 등록)
+	innerMux := http.NewServeMux()
+	innerMux.Handle("/api/v1/evidences", s.evidenceH.Routes())
+	innerMux.Handle("/", s.restHandler.Mux())
+
 	outerMux.Handle("/", auth.BuildRESTChain(
-		auth.ABACMiddleware(abacEvaluator, s.cfg.AuthEnabled)(s.restHandler.Mux()),
+		auth.ABACMiddleware(abacEvaluator, s.cfg.AuthEnabled)(innerMux),
 		s.tokenValidator,
 		nil,
 		s.cfg.AuthEnabled,

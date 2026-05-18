@@ -93,6 +93,21 @@ func (s *PgWorkflowStore) PoolStats() *pgxpool.Stat {
 	return s.pool.Stat()
 }
 
+// BeginEvidenceTx 새로운 증빙 트랜잭션을 시작하여 PgEvidenceTx를 반환
+// 기존 워크플로우용 BeginTx와 동일한 단일 pgx pool(R-EVID-005)을 재사용한다.
+// 신규 pool을 생성하지 않으며, postgres.go(死 스텁)는 대상이 아니다 (strategy.md §0).
+// 반환된 EvidenceTx는 반드시 Commit 또는 Rollback 중 하나로 종료해야 함
+//
+// @MX:ANCHOR: [AUTO] 증빙 도메인 유일 TX 진입점 — 핸들러/통합 테스트 3곳 이상에서 호출
+// @MX:REASON: 단일 pool 싱글톤 재사용(R-EVID-005) 계약 — 신규 pgxpool 생성 금지, pg_store.go:84 BeginTx 패턴 미러
+func (s *PgWorkflowStore) BeginEvidenceTx(ctx context.Context) (EvidenceTx, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return nil, fmt.Errorf("BeginEvidenceTx 실패: %w", stderrors.ErrPgxPoolExhausted)
+	}
+	return &PgEvidenceTx{tx: tx, logger: s.logger}, nil
+}
+
 // PgWorkflowTx pgx.Tx 래퍼 — WorkflowTx 인터페이스 구현
 // 단일 PostgreSQL 트랜잭션 내에서 모든 쓰기 연산을 수행
 //
