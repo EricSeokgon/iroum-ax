@@ -64,23 +64,32 @@ TDD: RED user_id NULL/실사용자 검증 실패 → GREEN resolveUserID 재사�
 - `audit_logs.user_id = 'cli-anonymous'`
 - 두 컬럼이 byte-identical (cross-table consistency, SPEC-AX-EVID-001 AC-EVID-UBI-003 / SPEC-AX-EVAL-ITEM-001 AC-EVALITEM-UBI-003 정합)
 
-### AC-SCORE-UBI-004 (Score Immutability — No Physical Delete)
+### AC-SCORE-UBI-004 (Score Immutability — status state-machine + append-only, Decision 4 RESOLVED)
 
-REQ 대응: REQ-SCORE-UBI-004 (물리 삭제 금지, 확정 점수 불변 — 정확 규칙 §6 OPEN).
-TDD: RED 점수 물리 DELETE 허용(잘못) → GREEN 무삭제 + status 전이 경로.
+REQ 대응: REQ-SCORE-UBI-004 (물리 삭제 0건 + status state-machine, Decision 4 RESOLVED).
+TDD: RED 점수 물리 DELETE 허용 또는 CONFIRMED in-place 수정 허용(잘못) → GREEN 무삭제 + DRAFT/CONFIRMED/SUPERSEDED state-machine.
 
 **Given**:
-- 점수 `id=<UUID>` (`status='CONFIRMED'`)이 존재
+- 점수 `id=<UUID-A>` (`status='CONFIRMED'`, `score_value=85.00`)이 존재
 
 **When**:
-- 점수 정정/철회를 수행한다 (plan.md §6.4 strategy 확정 규칙 — 잠정: status 전이 또는 신규 행)
+- (a) `UpdateScore(<UUID-A>, score_value=90.00)` (CONFIRMED in-place 수정 시도)
+- (b) CONFIRMED 점수 정정을 수행한다 (Decision 4 RESOLVED 규칙: 신규 행 INSERT + 구 행 `CONFIRMED→SUPERSEDED`)
+- (c) 어떤 status의 점수든 물리 DELETE를 시도한다
 
-**Then**:
-- `scores` 테이블에서 해당 행의 물리 DELETE 0건 (무삭제 보장 — REQ-SCORE-UBI-004)
-- 정정은 status 전이(`CONFIRMED`→`SUPERSEDED`) 또는 신규 행으로 표현됨 (정확 형태는 plan.md §6.4 strategy 확정 — 본 AC는 "물리 삭제 0건 + 변경 추적 가능"을 검증, 구체 전이표는 strategy 후 정정)
-- 변경이 `audit_logs`로 추적 가능 (REQ-SCORE-UBI-002 정합)
+**Then** (a):
+- CONFIRMED 행 score 필드 in-place 수정이 구조화 에러로 거부됨 (`<UUID-A>.score_value` 불변 — Decision 4)
 
-> 비고: 본 AC의 정정 메커니즘 구체 단언(신규 행 vs in-place + 전이표)은 plan.md §6.4 OPEN 결정에 의존한다. Run Phase 1 strategy + Human Gate 확정 후 SPEC-AX-EVAL-ITEM-001 v0.1.3 Decision 정정 패턴과 동일하게 본 AC 텍스트를 확정한다. 불변(물리 삭제 0건) 핵심 단언은 strategy와 무관하게 고정.
+**Then** (b):
+- 신규 행 `id=<UUID-B>` INSERT (정정값) + `<UUID-A>.status` = `CONFIRMED → SUPERSEDED` 전이 (동일 `ScoreTx`)
+- `<UUID-A>` 행은 보존(SUPERSEDED), `score_value` 동결; `SUPERSEDED`는 terminal
+- 신규 행 INSERT + 구 행 전이 각각 `audit_logs` row 1건 (동일 TX, REQ-SCORE-UBI-002 정합)
+
+**Then** (c):
+- `scores` 테이블에서 어떤 행의 물리 DELETE 0건 (`DeleteScore` 메서드 미존재 — 무삭제 보장, REQ-SCORE-UBI-004)
+- 모든 변경이 `audit_logs`로 추적 가능
+
+> 비고: Decision 4 RESOLVED (plan.md §6.4, strategy.md §A) 확정 규칙으로 본 AC 단언 확정 — 전이표 `DRAFT→DRAFT`/`DRAFT→CONFIRMED`/`CONFIRMED→SUPERSEDED`. DRAFT 행 in-place 가변 검증은 AC-SCORE-001-S2가 담당. SPEC-AX-EVAL-ITEM-001 v0.1.3 Decision 정정 패턴 동일.
 
 ---
 
@@ -151,6 +160,33 @@ TDD: RED 검증 부재 → GREEN store pre-INSERT 검증.
 - `scores` 변화 0건, `audit_logs` 변화 0건 (트랜잭션 미커밋)
 - 서버 로그 레벨 = INFO (client error, not server defect — REQ-SCORE-001-U1)
 
+### AC-SCORE-001-S2 (status state-machine — DRAFT in-place 가변 / CONFIRMED 불변, Decision 4 RESOLVED)
+
+REQ 대응: REQ-SCORE-001-S2 (Decision 4 RESOLVED status state-machine — DRAFT 가변, CONFIRMED 불변+정정=신규행). AC-SCORE-UBI-004와 상보: UBI-004는 CONFIRMED 정정 경로+무삭제, 본 AC는 DRAFT 가변 경로 + CONFIRMED 거부 단언.
+TDD: RED DRAFT 수정 거부 또는 CONFIRMED in-place 허용(잘못) → GREEN `validateScoreStatusTransition` 가드.
+
+**Given**:
+- 점수 `id=<UUID-D>` (`status='DRAFT'`, `score_value=70.00`)와 점수 `id=<UUID-C>` (`status='CONFIRMED'`, `score_value=88.00`)이 존재
+
+**When**:
+- (a) `UpdateScore(<UUID-D>, score_value=75.00, weight=0.2000)` (DRAFT in-place 수정)
+- (b) `UpdateScore(<UUID-C>, score_value=95.00)` (CONFIRMED score 필드 수정 시도)
+- (c) `UpdateScore(<UUID-D>, status='CONFIRMED')` (DRAFT→CONFIRMED 전이)
+
+**Then** (a):
+- `<UUID-D>` 행이 in-place 갱신됨 (`score_value=75.00`, `weight=0.2000` — DRAFT 가변, Decision 4 rule 1)
+- 동일 `ScoreTx` 내 `SCORE_UPDATED` audit row 1건 (REQ-SCORE-UBI-002 정합)
+
+**Then** (b):
+- 구조화 에러로 거부됨 (CONFIRMED 행 score 필드 불변 — Decision 4 rule 2), `<UUID-C>.score_value` 변경 0건
+- `scores`/`audit_logs` 변화 0건 (트랜잭션 미커밋)
+
+**Then** (c):
+- `<UUID-D>.status` = `DRAFT → CONFIRMED` 전이 성공 (허용 전이, Decision 4 전이표)
+- 동일 TX 내 `SCORE_UPDATED` audit row 1건
+
+> 비고: 본 AC는 plan.md §6.4 Decision 4 RESOLVED 규칙으로 확정. CONFIRMED 정정=신규행+SUPERSEDED 경로 및 물리 삭제 0건은 AC-SCORE-UBI-004가 담당 (상보 coverage, 중복 아님).
+
 ### AC-SCORE-001-O1-1 (Optional — metadata JSONB opaque verbatim 영속)
 
 REQ 대응: REQ-SCORE-001-O1 (caller가 metadata JSONB payload 제공 시 구조 해석 없이 verbatim opaque 영속).
@@ -195,21 +231,21 @@ TDD: RED SumWeightedByEvaluationItem 미구현 → GREEN Σ(score×weight) 단�
 
 ### AC-SCORE-002-2 (Edge — NULL weight 누락 가중치 결정적 처리)
 
-REQ 대응: REQ-SCORE-002-U1 (NULL weight가 집계를 조용히 왜곡하지 않음 — 제외 vs 에러, 정확 정책 §6 OPEN).
-TDD: RED NULL weight가 0 또는 1로 조용히 강제됨(잘못) → GREEN 결정적 제외 또는 구조화 에러.
+REQ 대응: REQ-SCORE-002-U1 (NULL weight가 집계를 조용히 왜곡하지 않음, 결정적 단일 고정 정책).
+TDD: RED NULL weight가 0 또는 1로 조용히 강제됨(잘못) → GREEN 결정적 단일 정책 (제외 또는 구조화 에러).
 
 **Given**:
 - 평가항목 `evaluation_item_id="AX-SAFETY-ORG-02"`에 raw-level 점수 2건: (90.00, 0.6000), (80.00, NULL weight)
 
 **When**:
-- `SumWeightedByEvaluationItem("AX-SAFETY-ORG-02")`을 호출한다
+- `SumWeightedByEvaluationItem("AX-SAFETY-ORG-02")`을 2회 호출한다
 
 **Then**:
 - NULL weight 행이 조용히 임의 기본값(0 또는 1)으로 강제되어 결과를 왜곡하지 **않음** (REQ-SCORE-002-U1)
-- subsystem이 결정적으로 처리: 해당 행을 명시적으로 제외하거나 구조화 "missing weight" 에러를 surface (정확 정책 = plan.md §6.1/§6.4 strategy 확정 — 본 AC는 "비결정적 왜곡 0건"을 검증, 제외/에러 구체 단언은 strategy 후 정정)
-- 동일 입력 → 동일 결과 (결정성)
+- subsystem이 단일 고정 결정적 정책을 적용: 해당 행을 결정적으로 제외하거나 구조화 "missing weight" 에러를 surface
+- 2회 호출이 동일 입력에 동일 결과 (결정성 — 비결정적 분기 0건)
 
-> 비고: 누락 가중치 정책(제외 vs 에러)은 plan.md §6 OPEN에 의존. strategy 확정 후 본 AC의 Then 구체 단언을 SPEC-AX-EVAL-ITEM-001 Decision 정정 패턴으로 확정. "조용한 왜곡 0건 + 결정성" 핵심 단언은 고정.
+> 비고: §6 Human Gate 4건은 테이블/audit-id/grade-threshold/불변이며, NULL-weight 정책(제외 vs 에러)은 그 4건에 포함되지 않는 **구현 세부**로 Sprint S4 구현 시 단일 결정적 규칙으로 고정한다(spec.md REQ-SCORE-002-U1, plan.md §4 S4). 본 AC의 "조용한 왜곡 0건 + 결정성" 핵심 단언은 구현 형태와 무관하게 고정 — 두 형태(제외/에러) 모두 본 Then을 만족한다.
 
 ---
 
@@ -217,43 +253,45 @@ TDD: RED NULL weight가 0 또는 1로 조용히 강제됨(잘못) → GREEN 결�
 
 ### AC-SCORE-003-1 (Happy Path: score → letter 결정적 매핑)
 
-REQ 대응: REQ-SCORE-003-E1 (deterministic internal threshold, 외부 호출 0).
-TDD: RED 등급 매핑 미구현 → GREEN 내부 threshold 결정적 매핑.
+REQ 대응: REQ-SCORE-003-E1 (deterministic `grade_thresholds` table lookup, 외부 호출 0 — Decision 3 RESOLVED).
+TDD: RED 등급 매핑 미구현 또는 metadata JSONB 의존(잘못) → GREEN `grade_thresholds` 테이블 결정적 lookup.
 
 **Given**:
-- grade-threshold 모델이 설정됨 (위치 = plan.md §6.3 OPEN — metadata JSONB 또는 `grade_thresholds`; 본 AC는 잠정 임계값 S≥90, A≥80, B≥70, C≥60, D<60 사용 — 실제 임계값은 strategy 확정)
-- 집계 점수 값 `83.00`
+- `grade_thresholds` 테이블(Decision 3 RESOLVED)에 `scope='default'` 행 5건: (S,90.00,gte) (A,80.00,gte) (B,70.00,gte) (C,60.00,gte) (D,0.00,gte)
+- 집계 점수 값 `83.00`, scope=`'default'`
 
 **When**:
-- 호출자가 `83.00`에 대한 letter 등급을 요청한다
+- 호출자가 scope=`'default'`, value=`83.00`에 대한 letter 등급을 요청한다
 
 **Then**:
-- 반환 등급이 정확히 `{S, A, B, C, D}` 중 하나 (잠정 임계값 기준 `A` — 80 ≤ 83 < 90)
-- 등급 산출 경로에서 외부 LLM/SaaS 호출 0건 (내부 결정적 threshold만 — REQ-SCORE-UBI-001 / spec.md §5 #5)
-- 동일 값 재요청 시 동일 등급 (결정성)
+- `grade_thresholds` 테이블을 `SELECT ... WHERE scope='default'` 후 S→D 내림차순 `min_value` 스캔하여 `boundary_rule='gte'` 기준 `83.00 >= 80.00` (A 행) 매칭 → 등급 `A` 반환
+- metadata JSONB를 등급 산출에 사용하지 **않음** (Decision 3 — REQ-SCORE-001-O1 opacity 계약 정합)
+- 등급 산출 경로에서 외부 LLM/SaaS 호출 0건 (내부 결정적 테이블 lookup만 — REQ-SCORE-UBI-001 / spec.md §5 #5)
+- 동일 (scope, value) 재요청 시 동일 등급 (결정성)
 
 ### AC-SCORE-003-2 (Edge — 경계값 결정성 + threshold 미설정 결정적 실패)
 
-REQ 대응: REQ-SCORE-003-S1 (미설정 시 결정적 실패, 등급 임의 생성 금지) + REQ-SCORE-003-U1 (경계값 결정성).
-TDD: RED 경계값 비결정/미설정 시 임의 등급 fabricate(잘못) → GREEN 결정적 경계 + 구조화 실패.
+REQ 대응: REQ-SCORE-003-S1 (`grade_thresholds` 0행 → 결정적 실패) + REQ-SCORE-003-U1 (`boundary_rule` 경계 결정성). Decision 3 RESOLVED.
+TDD: RED 경계값 비결정/미설정 시 임의 등급 fabricate(잘못) → GREEN `boundary_rule` 결정적 경계 + 0행 구조화 실패.
 
 **Given**:
-- (a) grade-threshold 설정됨, 집계 값이 경계값과 정확히 일치 (잠정 A 경계 = `80.00`)
-- (b) 요청 scope에 grade-threshold 설정이 **없음**
+- (a) `grade_thresholds`에 `scope='default'` A 행 `(A, min_value=80.00, boundary_rule='gte')` 존재, 집계 값이 경계값과 정확히 일치(`80.00`)
+- (b) 요청 scope=`'unknown-scope'`에 `grade_thresholds` 행이 **0건**
 
 **When**:
-- (a) `80.00`에 대한 등급을 2회 요청한다
-- (b) threshold 미설정 scope에 대해 등급을 요청한다
+- (a) scope=`'default'`, `80.00`에 대한 등급을 2회 요청한다
+- (b) scope=`'unknown-scope'`에 대해 등급을 요청한다
 
 **Then** (a):
-- 두 요청 모두 동일 등급 반환 (경계값 비결정성 0건 — `>=` vs `>` 규칙은 plan.md §6.3 strategy 확정, 본 AC는 "동일 입력 → 동일 등급" 결정성 검증)
+- `boundary_rule='gte'`이므로 `80.00 >= 80.00` → 등급 `A` 반환 (경계 포함, 기획재정부 편람 "임계값=하한" 의미론 정합)
+- 두 요청 모두 동일 등급 `A` (경계값 비결정성 0건 — `boundary_rule` 명시 컬럼 기반 결정적, Decision 3)
 
 **Then** (b):
-- 구조화 "grade thresholds unavailable" 에러 surface (REQ-SCORE-003-S1)
+- `SELECT ... WHERE scope='unknown-scope'` → 0행 → 구조화 "grade thresholds unavailable" 에러 surface (REQ-SCORE-003-S1)
 - letter 등급을 임의 생성하지 **않음** (등급 fabricate 0건)
 - 서버 로그 레벨 = INFO 또는 명시적 설정 누락 에러 (client/config error, not silent default)
 
-> 비고: 경계 포함/배제 규칙(`gte`/`gt`)과 threshold 모델 위치는 plan.md §6.3 OPEN. strategy 확정 후 구체 임계값/경계 단언 정정. "결정성 + 미설정 시 fabricate 0건" 핵심 단언 고정.
+> 비고: Decision 3 RESOLVED (`grade_thresholds` 테이블 + `boundary_rule` 컬럼, 기본 `gte`) 확정으로 본 AC 단언 확정. plan.md §6.3 / strategy.md §A Decision 3.
 
 ---
 
@@ -273,12 +311,13 @@ TDD: RED RecordScore* 미구현 → GREEN recorder.go 메서드 + audit.Event �
 
 **Then**:
 - 생성: `audit.Event`의 `Action="SCORE_CREATED"`, `ResourceType="score"`, `UserID="cli-anonymous"`(resolveUserID), `Timestamp` NOT NULL
-- `Event.ResourceID` (= `audit_logs.resource_id`, `uuid.UUID NOT NULL`)가 점수 audit 식별자 (Option 1 잠정 = `scores.id` UUID, `resource_id != uuid.Nil`; 최종 전략 plan.md §6.2 OPEN)
-- 실제 맥락은 `DetailsJSON`: `details->>'score_id'`, `details->>'evaluation_item_id'='AX-SAFETY-ORG-01-1'`, `details->>'level'='raw'` (`evidence_id`/`grade`도 해당 시 포함)
-- 수정: `Action="SCORE_UPDATED"`, 동일 식별 규칙
+- `Event.ResourceID` (= `audit_logs.resource_id`, `uuid.UUID NOT NULL`)가 **`score.id`와 byte-identical** (Decision 2 RESOLVED Option 1 직접 대입, surrogate 아님; `resource_id != uuid.Nil` 항상 성립 — `scores.id`가 UUID PK이므로 비-UUID→`uuid.Nil` 강등 구조적 부재)
+- 실제 비즈니스 맥락은 `DetailsJSON`: `details->>'score_id'`, `details->>'evaluation_item_id'='AX-SAFETY-ORG-01-1'`, `details->>'level'='raw'` (`evidence_id`/`grade`/`status`도 해당 시 포함)
+- `uuid.NewSHA1` 호출 0건, 신규 `ScoreAuditNamespace` 상수 0건 (Decision 2 — AUD-1 surrogate 미적용)
+- 수정: `Action="SCORE_UPDATED"`, 동일 식별 규칙(`ResourceID = score.id`)
 - 동일 `AuditTx`로 INSERT (store→audit 순환 의존 없음 — `audit` 패키지가 `store` 미import)
 
-> 비고: `resource_id` 매핑(Option 1 직접 UUID vs Option 2 surrogate)은 plan.md §6.2 OPEN. 결정 1(테이블 구조)이 비-UUID PK 채택 시 SPEC-AX-EVAL-ITEM-001 AC-EVALITEM-003-1 AUD-1 패턴으로 본 AC를 정정. `scores.id` UUID PK 잠정 → Option 1 직접.
+> 비고: Decision 2 RESOLVED (plan.md §6.2, strategy.md §A) — `scores.id` UUID PK ⟹ Option 1 직접 대입 확정. EVAL-ITEM-001이 겪은 audit resource_id 타입 불일치(VARCHAR PK→`uuid.Nil`)가 구조적으로 부재하므로 AC-EVALITEM-003-1 AUD-1 surrogate 패턴 미적용 (본 SPEC이 EVAL-ITEM보다 단순).
 
 ### AC-SCORE-004-2 (Edge — Audit Fail → 점수+감사 양방향 Rollback 원자성)
 
@@ -332,9 +371,9 @@ SPEC-AX-EVID-001 §5 / SPEC-AX-EVAL-ITEM-001 §6 표 패턴. 한국 공공 6제�
 |------|----------|---------|-----------|
 | 데이터 주권 | 생성/조회/수정/롤업/등급 외부 호출 0건, 외부 LLM/SaaS SDK 미import (LLM 시뮬레이션 범위 밖) | AC-SCORE-UBI-001 | 네트워크 spy + 정적 import 검사 |
 | 언어 (한글 metadata) | metadata JSONB가 한글 채점 코멘트 수용 (UTF-8) | AC-SCORE-001-O1-1 | 한글 문자열 round-trip |
-| 감사 가능성 | 모든 create/update → 동일 TX audit_logs 1건, 누락 0; resource_id=점수 audit 식별자(Option 1 잠정 UUID), 실 맥락 DetailsJSON | AC-SCORE-UBI-002, AC-SCORE-004-1 | testcontainers row count |
+| 감사 가능성 | 모든 create/update → 동일 TX audit_logs 1건, 누락 0; resource_id=`score.id` 직접 UUID(Decision 2 RESOLVED Option 1, surrogate 아님), 실 맥락 DetailsJSON | AC-SCORE-UBI-002, AC-SCORE-004-1 | testcontainers row count |
 | cli-anonymous 기본값 | AuthN disabled 시 created_by/user_id='cli-anonymous' literal | AC-SCORE-UBI-003 | 컬럼 byte 비교 |
-| 무결성 (불변/무삭제) | `scores` 물리 삭제 0건, 확정 점수 불변 (정확 규칙 §6 OPEN) | AC-SCORE-UBI-004 | DELETE 부재 + status 전이 검증 |
+| 무결성 (불변/무삭제) | `scores` 물리 삭제 0건, status state-machine (DRAFT 가변/CONFIRMED 불변/정정=신규행+SUPERSEDED, Decision 4 RESOLVED) | AC-SCORE-UBI-004, AC-SCORE-001-S2 | DELETE 부재 + status 전이 검증 |
 | 시간 제약 | 점수 생성/가중 롤업 p99 < 50ms (단일 레벨) | AC-SCORE-001-1, AC-SCORE-002-1 | 10회 반복 latency 측정 |
 
 ---
@@ -356,7 +395,8 @@ plan.md §7 R-SCORE-001~008 risk register 매핑.
 | 등급 경계값 결정성 + threshold 미설정 결정적 실패 (fabricate 0건) | AC-SCORE-003-2 | R-SCORE-004 |
 | audit INSERT 실패 → 점수+audit 양방향 rollback | AC-SCORE-004-2, AC-SCORE-UBI-002 | R-SCORE-005 |
 | store→audit 순환 의존 회피 (로컬 AuditTx) | AC-SCORE-004-1 | (아키텍처 불변식) |
-| `scores` 물리 삭제 0건 / 확정 점수 불변 | AC-SCORE-UBI-004 | (무결성, §6.4 OPEN) |
+| `scores` 물리 삭제 0건 + CONFIRMED 정정=신규행+SUPERSEDED (Decision 4) | AC-SCORE-UBI-004 | (무결성, §6.4 RESOLVED) |
+| status state-machine: DRAFT in-place 가변 / CONFIRMED 불변 전이 (Decision 4) | AC-SCORE-001-S2 | (무결성 state-machine, §6.4 RESOLVED) |
 | evidences/evaluation_items FK 부재 + 미수정 유지 (out-of-scope 경계) | AC-SCORE-BOUNDARY-1 | R-SCORE-002, R-SCORE-007 |
 | cli-anonymous 기본값 (NULL 금지) | AC-SCORE-UBI-003 | (입력 검증) |
 | 외부 LLM/저장 서비스 호출 부적격 (LLM 시뮬레이션 범위 밖) | AC-SCORE-UBI-001 | R-SCORE-008 |
@@ -371,12 +411,13 @@ plan.md §7 R-SCORE-001~008 risk register 매핑.
 | AC-SCORE-001-2 | evidence_id FK 가정 → schema 불일치 | UUID nullable stub 컬럼 (FK 없음) DDL |
 | AC-SCORE-001-3 | evaluation_item_id UUID/FK 가정 → schema 불일치 | VARCHAR(64) stub 컬럼 (FK 없음) DDL |
 | AC-SCORE-001-4 | 입력 검증 부재 → blank/비수치가 성공 | store pre-INSERT 검증 |
+| AC-SCORE-001-S2 | DRAFT 수정 거부 또는 CONFIRMED in-place 허용(잘못) | `validateScoreStatusTransition` 가드 (DRAFT 가변/CONFIRMED 불변/전이표, Decision 4) |
 | AC-SCORE-001-O1-1 | metadata 미저장/구조 강제(잘못) | JSONB 컬럼 semantic round-trip (opaque, byte 비교 금지) |
-| AC-SCORE-002-1 | SumWeightedByEvaluationItem 미구현 | 단일 레벨 Σ(score×weight) DECIMAL + parent_id 인덱스 |
-| AC-SCORE-002-2 | NULL weight 0/1 조용히 강제(잘못) | 결정적 제외 또는 구조화 에러 (정책 §6 strategy) |
-| AC-SCORE-003-1 | 등급 매핑 미구현 | 내부 결정적 threshold → letter |
-| AC-SCORE-003-2 | 경계값 비결정/미설정 시 fabricate(잘못) | 결정적 경계 + 구조화 "unavailable" 실패 |
-| AC-SCORE-004-1 | RecordScore* 미구현 | recorder.go 메서드 2개 + audit.Event (resource_id Option 1 잠정 UUID, 실 맥락 DetailsJSON) |
+| AC-SCORE-002-1 | SumWeightedByEvaluationItem 미구현 | 단일 레벨 Σ(score×weight) DECIMAL + evaluation_item_id 인덱스 |
+| AC-SCORE-002-2 | NULL weight 0/1 조용히 강제(잘못) | 단일 고정 결정적 정책 (제외 또는 에러, S4 구현 고정) |
+| AC-SCORE-003-1 | 등급 매핑 미구현 또는 metadata JSONB 의존(잘못) | `grade_thresholds` 테이블 결정적 lookup (Decision 3) |
+| AC-SCORE-003-2 | 경계값 비결정/미설정 시 fabricate(잘못) | `boundary_rule` 결정적 경계 + 0행 구조화 "unavailable" 실패 (Decision 3) |
+| AC-SCORE-004-1 | RecordScore* 미구현 또는 surrogate 가정(잘못) | recorder.go 메서드 2개 + audit.Event (resource_id = score.id 직접 UUID, namespace 상수 0, Decision 2) |
 | AC-SCORE-004-2 | audit 실패 시 점수 잔존 | store tx.Rollback 양방향 |
 | AC-SCORE-BOUNDARY-1 | scores→evidences/evaluation_items FK 존재 가정 → schema 불일치 | 본 SPEC FK 미추가 확인 (EVID/EVAL-ITEM 불변) |
 | AC-SCORE-UBI-001~004 | sovereignty/audit/cli-anonymous/무삭제 위반 탐지 | 내부 pgx pool + 내부 threshold + Recorder 재사용 + resolveUserID + 무삭제 |
@@ -388,11 +429,11 @@ plan.md §7 R-SCORE-001~008 risk register 매핑.
 모두 PASS 필요:
 
 - [ ] §0: REQ-SCORE-UBI 전용 AC 4개 (UBI-001~004) 자동화 통과
-- [ ] §1-§4: 4개 modal REQ AC 자동화 통과 (AC-SCORE-001-{1..4, O1-1}, AC-SCORE-002-{1,2}, AC-SCORE-003-{1,2}, AC-SCORE-004-{1,2})
+- [ ] §1-§4: 4개 modal REQ AC 자동화 통과 (AC-SCORE-001-{1..4, S2, O1-1}, AC-SCORE-002-{1,2}, AC-SCORE-003-{1,2}, AC-SCORE-004-{1,2})
 - [ ] §5: 경계 AC (AC-SCORE-BOUNDARY-1) — evidences/evaluation_items FK 부재 + 미수정 확인
 - [ ] §6: 한국 공공 6제약 검증 통과
-- [ ] §7: 15개 edge case 모두 대응 AC로 검증 (§7 Edge Case Catalog 표 물리적 데이터 행 수 = 15, acceptance.md L348-362)
-- [ ] §6 OPEN 의존 AC(UBI-004, 002-2, 003-1/2, 004-1)는 Run Phase 1 strategy 확정 후 구체 단언 정정 (핵심 불변 단언은 strategy 무관 고정)
+- [ ] §7: 16개 edge case 모두 대응 AC로 검증 (§7 Edge Case Catalog 표 물리적 데이터 행 수 = 16 — v0.1.2 status state-machine row 추가로 15→16)
+- [ ] §6 4건 RESOLVED (v0.1.2): AC-SCORE-UBI-004/001-S2(Decision 4 status state-machine), 003-1/003-2(Decision 3 grade_thresholds), 004-1(Decision 2 직접 UUID) 구체 단언 확정. 002-2(NULL weight)는 §6 4건 외 S4 구현 고정 (핵심 불변 단언은 구현 무관 고정)
 - [ ] coverage ≥ 85% (go test -cover)
 - [ ] golangci-lint default + gosec 0 issue
 - [ ] `goleak.VerifyNone(t)` 모든 테스트 통과
@@ -401,4 +442,4 @@ plan.md §7 R-SCORE-001~008 risk register 매핑.
 - [ ] manager-quality TRUST 5 통과
 - [ ] evaluator-active per-sprint scoring 모두 ≥ 0.75 (strict profile, thorough harness)
 
-**Total AC count**: 16 — (§0 UBI: 4 [UBI-001~004], §1: 5 [AC-SCORE-001-1..4, AC-SCORE-001-O1-1], §2: 2 [AC-SCORE-002-1,2], §3: 2 [AC-SCORE-003-1,2], §4: 2 [AC-SCORE-004-1,2], §5: 1 [AC-SCORE-BOUNDARY-1]). 분해 합 = 4+5+2+2+2+1 = 16 = 물리적 AC heading 16개(acceptance.md `### AC-SCORE-` heading 직접 카운트 — UBI-001/002/003/004, 001-1/2/3/4/O1-1, 002-1/2, 003-1/2, 004-1/2, BOUNDARY-1). 각 modal REQ 모듈은 최소 2개 AC (≥2 요건 충족, §1은 5개). 5개 REQ 모듈 = 1 Ubiquitous 묶음(UBI-001~004) + 4 modal(001/002/003/004) — 모듈 ≤5. §9 DoD §1-§4 enumeration(modal 11 + UBI 4 + BOUNDARY 1 = 16)·spec-compact.md count·본 Total이 모두 16으로 일치(single source of truth). SPEC-AX-EVID-001 / SPEC-AX-EVAL-ITEM-001 v0.1.x 점진 보강 패턴과 동일하게 Run Phase 1 strategy 확정 후 §6 OPEN 의존 AC를 정정한다.
+**Total AC count**: 17 — (§0 UBI: 4 [UBI-001~004], §1: 6 [AC-SCORE-001-1..4, AC-SCORE-001-S2, AC-SCORE-001-O1-1], §2: 2 [AC-SCORE-002-1,2], §3: 2 [AC-SCORE-003-1,2], §4: 2 [AC-SCORE-004-1,2], §5: 1 [AC-SCORE-BOUNDARY-1]). 분해 합 = 4+6+2+2+2+1 = 17 = 물리적 AC heading 17개(acceptance.md `### AC-SCORE-` heading 직접 카운트 — UBI-001/002/003/004, 001-1/2/3/4/S2/O1-1, 002-1/2, 003-1/2, 004-1/2, BOUNDARY-1). v0.1.2: AC-SCORE-001-S2 신규 추가(Decision 4 status state-machine DRAFT/CONFIRMED — AC 16→17), §7 edge case 15→16(status state-machine row 추가). 각 modal REQ 모듈은 최소 2개 AC (≥2 요건 충족, §1은 6개). 5개 REQ 모듈 = 1 Ubiquitous 묶음(UBI-001~004) + 4 modal(001/002/003/004) — 모듈 ≤5. §9 DoD §1-§4 enumeration(modal 12 + UBI 4 + BOUNDARY 1 = 17)·spec-compact.md count·본 Total·물리 heading이 모두 17로 일치(single source of truth); §7 edge=16. §6 4건 RESOLVED 반영 완료 (v0.1.2, strategy.md §A + Human Gate). SPEC-AX-EVID-001 / SPEC-AX-EVAL-ITEM-001 v0.1.x 점진 보강 패턴과 동일.

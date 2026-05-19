@@ -65,6 +65,13 @@ const (
 	// ActionEvalItemUpdated 평가항목 속성/상태 변경 시 기록
 	// SPEC-AX-EVAL-ITEM-001 REQ-EVALITEM-003-E1 / REQ-EVALITEM-004-O1: 수정과 동일 TX에 audit_logs 1건
 	ActionEvalItemUpdated Action = "EVAL_ITEM_UPDATED"
+
+	// ActionScoreCreated 점수 행 생성 시 기록 (SPEC-AX-SCORE-001 REQ-SCORE-004)
+	// D2: resource_id = scores.id UUID 직접 대입 (AUD-1 surrogate 미사용)
+	ActionScoreCreated Action = "SCORE_CREATED"
+	// ActionScoreUpdated 점수 행 수정 시 기록 (SPEC-AX-SCORE-001 REQ-SCORE-004)
+	// D2: resource_id = scores.id UUID 직접 대입 (AUD-1 surrogate 미사용)
+	ActionScoreUpdated Action = "SCORE_UPDATED"
 )
 
 // EvalItemAuditNamespace 평가항목 감사 resource_id surrogate 생성용 고정 UUID namespace.

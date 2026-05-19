@@ -366,3 +366,61 @@ func (r *Recorder) RecordEvalItemUpdated(ctx context.Context, tx AuditTx, itemID
 	}
 	return tx.InsertAuditLog(ctx, e)
 }
+
+// RecordScoreCreated SCORE_CREATED 감사 이벤트를 기록 (SPEC-AX-SCORE-001)
+// 점수 생성과 동일 AuditTx에 audit_logs 1건 (REQ-SCORE-004)
+// D2: resource_id = scores.id UUID 직접 대입 — uuid.NewSHA1/AUD-1 surrogate 미사용
+//
+// @MX:ANCHOR: [AUTO] 점수 생성 감사 단일 진입점 — REQ-SCORE-004 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — D2 직접 UUID 계약 (SPEC-AX-SCORE-001)
+func (r *Recorder) RecordScoreCreated(ctx context.Context, tx AuditTx, scoreID uuid.UUID, evaluationItemID, level, userID string) error {
+	details, err := scoreDetails(scoreID, evaluationItemID, level)
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionScoreCreated,
+		ResourceType: "score",
+		ResourceID:   scoreID, // D2: 직접 대입, surrogate 금지
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordScoreUpdated SCORE_UPDATED 감사 이벤트를 기록 (SPEC-AX-SCORE-001)
+// 점수 수정과 동일 AuditTx에 audit_logs 1건 (REQ-SCORE-004)
+// D2: resource_id = scores.id UUID 직접 대입 — uuid.NewSHA1/AUD-1 surrogate 미사용
+//
+// @MX:ANCHOR: [AUTO] 점수 수정 감사 단일 진입점 — REQ-SCORE-004 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — D2 직접 UUID 계약 (SPEC-AX-SCORE-001)
+func (r *Recorder) RecordScoreUpdated(ctx context.Context, tx AuditTx, scoreID uuid.UUID, evaluationItemID, level, userID string) error {
+	details, err := scoreDetails(scoreID, evaluationItemID, level)
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionScoreUpdated,
+		ResourceType: "score",
+		ResourceID:   scoreID, // D2: 직접 대입, surrogate 금지
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// scoreDetails 점수 감사 이벤트 details JSON 생성 (D2 — score_id/evaluation_item_id/level 포함)
+func scoreDetails(scoreID uuid.UUID, evaluationItemID, level string) ([]byte, error) {
+	m := map[string]string{
+		"score_id":           scoreID.String(),
+		"evaluation_item_id": evaluationItemID,
+		"level":              level,
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("recorder: marshal score details: %w", err)
+	}
+	return b, nil
+}

@@ -123,6 +123,30 @@ func (s *PgWorkflowStore) BeginEvalItemTx(ctx context.Context) (EvalItemTx, erro
 	return &PgEvalItemTx{tx: tx, logger: s.logger}, nil
 }
 
+// BeginScoreTx 새로운 점수 트랜잭션을 시작하여 PgScoreTx를 반환
+// 기존 워크플로우용 BeginTx / 증빙용 BeginEvidenceTx / 평가항목용 BeginEvalItemTx와
+// 동일한 단일 pgx pool(SPEC-AX-SCORE-001 §1.4)을 재사용한다.
+// 신규 pool을 생성하지 않으며, postgres.go(死 스텁)는 대상이 아니다 (tasks.md §0 전략).
+// 반환된 ScoreTx는 반드시 Commit 또는 Rollback 중 하나로 종료해야 함
+//
+// @MX:ANCHOR: [AUTO] 점수 도메인 유일 TX 진입점 — 핸들러/통합 테스트/recorder 3곳 이상에서 호출
+// @MX:REASON: 단일 pool 싱글톤 재사용 계약 — 신규 pgxpool 생성 금지, pg_store.go:118 BeginEvalItemTx 패턴 미러
+func (s *PgWorkflowStore) BeginScoreTx(ctx context.Context) (ScoreTx, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return nil, fmt.Errorf("BeginScoreTx 실패: %w", stderrors.ErrPgxPoolExhausted)
+	}
+	// F1 DC-UBI-002: PgScoreTx에 Recorder를 주입하여 InsertScore/UpdateScore가
+	// 동일 pgx.Tx에 entity-INSERT + audit-INSERT를 원자적으로 기록하도록 한다
+	// (eval_item.go 선례 미러 — PgScoreTx 자신이 audit.AuditTx를 구현).
+	// authEnabled=false → user_id='cli-anonymous' (DC-UBI-003, scores.created_by 정합).
+	return &PgScoreTx{
+		tx:       tx,
+		logger:   s.logger,
+		recorder: audit.NewRecorder(false),
+	}, nil
+}
+
 // PgWorkflowTx pgx.Tx 래퍼 — WorkflowTx 인터페이스 구현
 // 단일 PostgreSQL 트랜잭션 내에서 모든 쓰기 연산을 수행
 //

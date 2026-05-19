@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/audit"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/types"
@@ -204,6 +205,98 @@ type EvalItemTx interface {
 	// status 열거 외/NULL 요청은 거부 (REQ-EVALITEM-004-U1)
 	UpdateEvalItem(ctx context.Context, id string, upd EvalItemUpdate) error
 	// InsertAuditLog 현재 트랜잭션 내에 감사 이벤트를 삽입 (Recorder가 호출)
+	InsertAuditLog(ctx context.Context, e *audit.Event) error
+	// Commit 현재 트랜잭션을 커밋하여 모든 변경사항을 영속화
+	Commit(ctx context.Context) error
+	// Rollback 현재 트랜잭션을 롤백 — defer로 호출하는 것이 안전, Commit 후 무시
+	Rollback(ctx context.Context) error
+}
+
+// Score 점수 도메인 엔티티 — scores 테이블 1행에 대응 (SPEC-AX-SCORE-001)
+// D1: level discriminator ∈{raw,item,category}, D4: status state-machine
+type Score struct {
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	Metadata         map[string]any
+	EvidenceID       *uuid.UUID
+	ScoreValue       *float64
+	Weight           *float64
+	EvaluationItemID string
+	Level            string
+	Grade            string
+	Status           string
+	CreatedBy        string
+	ID               uuid.UUID
+}
+
+// ScoreUpdate UpdateScore 부분 갱신 입력
+// nil 포인터 = "변경 요청 없음", non-nil = "해당 값으로 변경 요청".
+// CONFIRMED 행의 score_value/weight/grade 변경은 store 계층에서 거부 (D4).
+type ScoreUpdate struct {
+	// ScoreValue non-nil이면 점수 변경 (CONFIRMED 행 거부)
+	ScoreValue *float64
+	// Weight non-nil이면 가중치 변경 (CONFIRMED 행 거부)
+	Weight *float64
+	// Grade non-nil이면 등급 변경 (CONFIRMED 행 거부)
+	Grade *string
+	// Status non-nil이면 status 전이 요청
+	Status *string
+	// Metadata non-nil이면 metadata verbatim 갱신
+	Metadata *map[string]any
+}
+
+// ScoreStore 점수 영속성 최상위 인터페이스 (SPEC-AX-SCORE-001)
+// EvalItemStore 패턴을 미러링하여 BeginScoreTx 트랜잭션 진입점만 제공한다.
+//
+// @MX:ANCHOR: [AUTO] 점수 도메인 단일 DB 접근 계약 — 핸들러/통합 테스트/recorder 등 3곳 이상 호출 예정
+// @MX:REASON: 기존 EvalItemStore와 동일 — 단일 pool 싱글톤 재사용 계약. 신규 pgxpool 생성 금지.
+type ScoreStore interface {
+	// BeginScoreTx 새로운 점수 트랜잭션을 시작하여 반환
+	BeginScoreTx(ctx context.Context) (ScoreTx, error)
+}
+
+// ScoreTx 단일 데이터베이스 트랜잭션 내 점수 쓰기/조회 연산 인터페이스
+// InsertScore/UpdateScore와 InsertAuditLog는 동일 트랜잭션 내에서 atomic하게 처리되어야 함
+// (REQ-SCORE-UBI-002 / REQ-SCORE-004-U1 트랜잭션 원자성 불변 조건)
+//
+// @MX:ANCHOR: [AUTO] AC-SCORE-001-1 / AC-SCORE-UBI-002 원자성 계약의 핵심
+// @MX:REASON: pgx 구현체(PgScoreTx) + 핸들러 TX orchestration + recorder 등 3곳 이상에서 사용
+type ScoreTx interface {
+	// InsertScore scores 테이블에 새 행을 삽입하고 생성된 UUID를 반환
+	InsertScore(
+		ctx context.Context,
+		evaluationItemID string,
+		evidenceID *uuid.UUID,
+		level string,
+		scoreValue float64,
+		weight *float64,
+		metadata map[string]any,
+	) (uuid.UUID, error)
+	// GetScoreByID 점수 id로 단건을 조회
+	GetScoreByID(ctx context.Context, id uuid.UUID) (*Score, error)
+	// GetScoresByEvaluationItem 동일 evaluation_item_id의 점수 목록을 반환
+	GetScoresByEvaluationItem(ctx context.Context, evaluationItemID string) ([]*Score, error)
+	// UpdateScore 점수를 부분 갱신 (D4 state-machine 가드 포함)
+	// 성공 시 동일 TX에 SCORE_UPDATED audit 1건을 기록한다 (DC-UBI-002.2).
+	UpdateScore(ctx context.Context, id uuid.UUID, upd ScoreUpdate) error
+	// SupersedeAndReplaceScore CONFIRMED 행 정정 (D4): 신규 행 INSERT(status=CONFIRMED) +
+	// 구 행 CONFIRMED→SUPERSEDED, 동일 TX. 각 변경 1 audit row (신: SCORE_CREATED,
+	// 구: SCORE_UPDATED). 물리 DELETE 0건. 구 행이 CONFIRMED가 아니면 ErrScoreNotConfirmed.
+	SupersedeAndReplaceScore(
+		ctx context.Context,
+		oldID uuid.UUID,
+		newScoreValue float64,
+		newWeight *float64,
+		newMetadata map[string]any,
+	) (uuid.UUID, error)
+	// SumWeightedByEvaluationItem raw-level 자식 행의 가중합 Σ(score_value × weight) 반환
+	// SEC-03: float64 누적 금지 — pgtype.Numeric로 정확 십진 반환 (DB 사이드 집계).
+	// NULL-weight policy: exclude (GAP-01 결정적 정책)
+	SumWeightedByEvaluationItem(ctx context.Context, evaluationItemID string) (pgtype.Numeric, error)
+	// DetermineGrade grade_thresholds 테이블로부터 score에 대한 등급 문자를 결정적으로 반환
+	// scope 행 0건 → ErrGradeThresholdsUnavailable (등급 fabricate 금지 — D3 fail-closed)
+	DetermineGrade(ctx context.Context, scope string, score float64) (string, error)
+	// InsertAuditLog 현재 트랜잭션 내에 감사 이벤트를 삽입
 	InsertAuditLog(ctx context.Context, e *audit.Event) error
 	// Commit 현재 트랜잭션을 커밋하여 모든 변경사항을 영속화
 	Commit(ctx context.Context) error

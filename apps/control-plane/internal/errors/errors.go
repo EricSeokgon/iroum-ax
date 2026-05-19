@@ -48,3 +48,31 @@ var ErrEvalItemHierarchyImmutable = errors.New("evaluation item hierarchy is imm
 // ErrEvalItemInvalidStatus status 열거 외 값 또는 NULL 전이 시도 (REQ-EVALITEM-004-U1)
 // store 계층 사전 검증이 SQL 미실행 후 반환 (DB CHECK와 이중 방어).
 var ErrEvalItemInvalidStatus = errors.New("evaluation item invalid status value")
+
+// ErrScoreNotFound 요청한 점수 ID가 존재하지 않음 (SPEC-AX-SCORE-001)
+// GetScoreByID는 pgx.ErrNoRows 대신 이 센티널을 래핑하여 반환한다.
+var ErrScoreNotFound = errors.New("score not found")
+
+// ErrScoreInvalidInput 점수 입력 검증 실패 (evaluation_item_id blank/64자 초과,
+// score_value 누락, evidence_id 비-UUID — REQ-SCORE-001-U1). store 계층이 SQL 미실행 후 반환.
+var ErrScoreInvalidInput = errors.New("score invalid input")
+
+// ErrScoreImmutable CONFIRMED 행의 score_value/weight/grade 변경 시도 (D4)
+// store 계층 mutation guard가 SQL 미실행 후 반환.
+var ErrScoreImmutable = errors.New("score is immutable: confirmed score fields cannot be changed")
+
+// ErrScoreInvalidStatus status 열거 외 값 또는 허용되지 않은 전이 시도 (D4)
+var ErrScoreInvalidStatus = errors.New("score invalid status transition")
+
+// ErrGradeThresholdsUnavailable 요청한 scope의 grade_thresholds 행이 0개 (D3)
+// DetermineGrade는 등급을 fabricate하지 않고 이 에러를 반환 (SEC-04 fail-closed).
+var ErrGradeThresholdsUnavailable = errors.New("grade thresholds unavailable for scope")
+
+// ErrScoreAuditWriteFailed InsertScore/UpdateScore가 동일 TX 내 audit_logs INSERT에
+// 실패했을 때 반환 (DC-UBI-002 / REQ-SCORE-001-E1). 호출자가 errors.Is로 식별하여
+// 트랜잭션을 Rollback하면 scores/audit_logs 양쪽이 취소된다 (양방향 원자성, DC-004-U1).
+var ErrScoreAuditWriteFailed = errors.New("score audit write failed")
+
+// ErrScoreNotConfirmed CONFIRMED 정정(SupersedeAndReplaceScore)을 CONFIRMED 아닌 행에
+// 시도했을 때 반환 (D4 — 정정 대상은 반드시 CONFIRMED여야 함).
+var ErrScoreNotConfirmed = errors.New("score is not in CONFIRMED status; supersede requires CONFIRMED")
