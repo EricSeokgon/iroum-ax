@@ -7,6 +7,14 @@
 
 ## [Unreleased] - 2026-05-19
 
+### Added — SPEC-AX-REPORT-001 v0.1.1 (경영평가 결과 리포트/집계 HTTP API 계층)
+
+- **단건 REST 엔드포인트 1개** (`apps/control-plane/cmd/server/report_handlers.go`): `GET /api/v1/reports/category/{id}` — 범주별 집계 리포트(범주 id·name, 자식 item별 `weighted_sum`, `category_total`, `category_grade` string|null, `generated_at`). 목록/페이지네이션 미적용(PoC 단건만 — §6.3 OPEN #3 RESOLVED B-2).
+- **ReportHandler** (`cmd/server/report_handlers.go`): `ReportHandler` struct + `NewReportHandler(ss ScoreStore, eis EvalItemStore, logger)` + `Routes() http.Handler`. cross-store 2-TX read 조합(EvalItemTx: `GetEvalItemByID`+`GetEvalItemsByParentID` / ScoreTx: `SumWeightedByEvaluationItem`×N+`DetermineGrade`), `math/big.Rat` 무손실 누적(float64 미경유 SEC-03), `ErrGradeThresholdsUnavailable`→`category_grade:null` B-2 graceful. 표준 에러 본문 `{"error":{"code","message","field"}}` 한국어(`score_handlers.go` 선례 미러). recorder 미주입 — read-only·mutation 0·자체 audit 0(REQ-REPORT-UBI-002).
+- **server.go 마운트** (`cmd/server/server.go`, ≈7줄 최소 단위): `reportH` 필드 + `NewReportHandler(pgStore, pgStore, logger)` + `innerMux.Handle("/api/v1/reports", ...)` + `innerMux.Handle("/api/v1/reports/", ...)` 2줄. Go1.22 ServeMux path-param 라우팅 구조적 필수(`score_handlers.go:263-264` 선례 정확 미러). ABAC 와이어링 0-diff.
+- **consumer-only 0-diff**: `internal/store|audit|auth|errors`·`score_handlers.go`·`evidence_handlers.go`·`.moai/db/schema/**` 무변경. 신규 DB 마이그레이션 0건·신규 store 메서드 0건·신규 외부 의존 0건(go.mod 핀 `github.com/jackc/pgx/v5 v5.9.2` 유지, `math/big` stdlib). read-only·API 자체 audit 0건.
+- **TDD RED-GREEN-REFACTOR**: genuine RED-first(D-1 negative-control mutation-tested 포함). 이중 게이트 PASS: evaluator-active 90.8 / manager-quality TRUST 5 PASS. `report_handlers.go` 커버리지 100%.
+
 ### Added — SPEC-AX-SCORE-API-001 v0.1.1 (경영평가 점수 조회/집계 HTTP API 계층)
 
 - **7개 REST 엔드포인트** (`apps/control-plane/cmd/server/score_handlers.go`): `GET /api/v1/scores/{id}` (단건 조회) · `GET /api/v1/scores` (목록, filter+pagination) · `GET /api/v1/scores/rollup` (가중 롤업, pgtype.Numeric 정밀도) · `GET /api/v1/scores/grade` (등급 조회) · `POST /api/v1/scores` (생성, 201) · `PUT /api/v1/scores/{id}` (수정, CONFIRMED 불변 409) · `POST /api/v1/scores/{id}/supersede` (CONFIRMED 정정, 201). Go1.22 ServeMux 최장일치 라우팅.

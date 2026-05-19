@@ -1,7 +1,7 @@
 ---
 id: SPEC-AX-REPORT-001
-version: 0.1.0
-status: draft
+version: 0.1.1
+status: completed
 created: 2026-05-19
 updated: 2026-05-19
 author: ircp
@@ -11,6 +11,7 @@ issue_number: 0
 
 # HISTORY
 
+- 0.1.1 (2026-05-19): SYNC — TDD sub-agent genuine RED-first(D-1 negative-control mutation-tested 추가) 완료. 이중 게이트 PASS: evaluator-active 90.8 / manager-quality TRUST 5 PASS. `report_handlers.go` 커버리지 100%. consumer-only 0-diff 불변(신규 마이그레이션 0·신규 store 메서드 0·신규 외부 의존 0·자체 audit 0). §6 3건 OPEN → RESOLVED: #1 cross-store 2-TX Option A(핸들러 조합), #2 `math/big.Rat` 무손실 누적(float64 미경유, SEC-03), #3 단건 `GET /api/v1/reports/category/{id}` + grade null B-2 graceful(D-1 mutation-tested negative-control). pgx 버전: go.mod 핀 `github.com/jackc/pgx/v5 v5.9.2`(ground-truth 확인 완료 — 외부 의존 목록 불변).
 - 0.1.0 (2026-05-19): 평가 결과 리포트/집계 HTTP API 계층(Evaluation Result Report/Aggregation HTTP API Layer) 첫 초안. SPEC-AX-SCORE-001(완료, v0.1.3)의 `ScoreStore`/`ScoreTx` 점수 store 계층 + SPEC-AX-EVAL-ITEM-001(완료)의 `EvalItemStore`/`EvalItemTx` taxonomy 계층 위에 **읽기 전용 리포트 HTTP API 계층만** 추가한다(SPEC-AX-SCORE-API-001 `score_handlers.go` 핸들러·라우팅 선례를 **read-only 부분집합으로** 미러링 — research.md §3). 핵심 기능: **범주(category) 롤업** — 평가범주 id를 받아 그 자식 평가항목(item)들을 EVAL-ITEM 계층에서 열거 → 각 item의 가중합(SCORE-001 `SumWeightedByEvaluationItem`)을 누적 → 범주 가중 총합 + 범주 등급(`DetermineGrade` 재사용)을 on-the-fly 산출(스냅샷 영속 없음). SPEC-AX-AUTH-003 경량 ABAC narrowing 통합 — **읽기 전용이므로 `viewer` 포함 모든 인증 사용자 허용, write 권한 게이팅 불필요(mutation 엔드포인트 0)**; cli-anonymous 기본값 + auth-disabled Walking Skeleton 투과. 한국 공공 6제약(데이터 주권/한국어/감사 가능성/망분리/조직 격리/시간 제약) 준수. **본 SPEC은 SPEC-AX-SCORE-001 / SPEC-AX-SCORE-API-001 / SPEC-AX-EVAL-ITEM-001 / SPEC-AX-AUTH-003의 순수 consumer이며 그 코드·스키마·FK·마이그레이션·audit을 일절 변경하지 않는다 — DB 변경 0, 신규 마이그레이션 0(읽기 전용 API 계층), 자체 audit 0(읽기 전용이므로 mutation 0 → audit 이벤트 0), 신규 외부 의존 0**. 풀 rubric 시스템, 6번째 시간 제약(KST 업무시간), 스냅샷 영속화, mutation(write) 엔드포인트, AUTH-003 모델을 넘는 풀 org-unit 속성 ABAC은 의도적 제외(§5 Exclusions). research.md(Phase 0.5 deep research, 674줄, file:line 근거)가 SSOT. (작성자: ircp)
 
 > Schema note: YAML frontmatter는 SPEC-AX-SCORE-001 / SPEC-AX-SCORE-API-001 / SPEC-AX-EVAL-ITEM-001 / SPEC-AX-AUTH-003과 동일하게 `.claude/skills/moai/workflows/plan.md` Phase 2 (L378)의 8-field canonical 정의(`id, version, status, created, updated, author, priority, issue_number`)를 따른다. `labels`, `created_at` 등 canonical 외 필드는 사용하지 않는다. 본 SPEC의 모든 EARS 요구사항·영향파일·HTTP 계약은 `.moai/specs/SPEC-AX-REPORT-001/research.md`(file:line 근거)에 근거하며, 소비 계약 시그니처는 `apps/control-plane/internal/store/store.go`(`ScoreStore`/`ScoreTx`/`EvalItemStore`/`EvalItemTx`/`Score`/`EvalItem`), `apps/control-plane/internal/store/score.go`(`PgScoreTx` 메서드), `apps/control-plane/internal/store/pg_store.go`(`BeginScoreTx`/`BeginEvalItemTx` 진입점), `apps/control-plane/internal/errors/errors.go`(에러 센티넬), `apps/control-plane/cmd/server/score_handlers.go`(read-only 핸들러 선례), `apps/control-plane/internal/auth/abac.go`·`rbac.go`·`middleware.go`(ABAC/RBAC), `apps/control-plane/cmd/server/server.go`(라우트 마운트), `apps/control-plane/go.mod`(외부 의존 인벤토리)에서 직접 검증되었다(phantom API 0건 — manager-spec orchestrator ground-truth grep, 2026-05-19).
