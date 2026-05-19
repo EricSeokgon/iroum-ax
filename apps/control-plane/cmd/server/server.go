@@ -52,6 +52,7 @@ type Server struct {
 	pgStore        *store.PgWorkflowStore
 	restHandler    *server.RESTHandler
 	evidenceH      *EvidenceHandler
+	scoreH         *ScoreHandler
 	dispatcher     *scheduler.CeleryDispatcher
 	grpcServer     *grpc.Server
 	httpServer     *http.Server
@@ -203,6 +204,10 @@ func New(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Server, 
 		cfg.EvidenceDuplicateSignalEnabled,
 	)
 
+	// 단계 (i-2): 점수 핸들러 (SPEC-AX-SCORE-API-001) — pgStore가 ScoreStore 구현
+	// consumer-only: store/audit/auth 0-diff, 자체 audit 없음 (store RecordScore* 동일 TX 전담)
+	s.scoreH = NewScoreHandler(pgStore, logger)
+
 	return s, nil
 }
 
@@ -255,6 +260,8 @@ func (s *Server) Run(ctx context.Context) error {
 	// (SPEC-AX-EVID-001 GAP-01 — POST /api/v1/evidences 라우트 등록)
 	innerMux := http.NewServeMux()
 	innerMux.Handle("/api/v1/evidences", s.evidenceH.Routes())
+	innerMux.Handle("/api/v1/scores", s.scoreH.Routes())
+	innerMux.Handle("/api/v1/scores/", s.scoreH.Routes())
 	innerMux.Handle("/", s.restHandler.Mux())
 
 	outerMux.Handle("/", auth.BuildRESTChain(
