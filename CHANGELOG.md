@@ -5,6 +5,29 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)을 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/lang/ko/)을 준수합니다.
 
+## [Unreleased] - 2026-05-19
+
+### Added — SPEC-AX-SCORE-001 v0.1.3 (경영평가 점수 산출/집계 Walking Skeleton)
+
+- **점수 데이터 모델** (`scores` + `grade_thresholds` 2테이블, `.moai/db/schema/migrations/0004_score_tables.sql`): Decision 1 Option A — 단일 `scores` 테이블 + `level` discriminator(`raw`/`item`/`category`). `id UUID PK DEFAULT uuid_generate_v4()`, `evaluation_item_id VARCHAR(64)` (FK 없는 stub, EVAL-ITEM-001 호환), `evidence_id UUID nullable` (FK 없는 stub, EVID-001 호환), `score_value DECIMAL(6,2)`, `weight DECIMAL(5,4) NULL` (NULL-weight policy: exclude, GAP-01), `grade VARCHAR(2) NULL`, `status VARCHAR(32) DEFAULT 'DRAFT'` CHECK(`DRAFT`/`CONFIRMED`/`SUPERSEDED`, D4 state-machine), `metadata JSONB`, `created_by DEFAULT 'cli-anonymous'`. CHECK 제약 3종(`level`, `status`, `grade`), 인덱스 3개. `grade_thresholds`(scope, letter, min_value, boundary_rule, PK(scope,letter)) — Decision 3, 최소 등급 임계값 테이블(풀 rubric 아님).
+- **ScoreStore / ScoreTx 계층** (`internal/store/store.go`, `internal/store/score.go`): `ScoreStore` 인터페이스(`BeginScoreTx`) + `ScoreTx` 인터페이스 + `PgScoreTx` 구현체. 7 메서드: `InsertScore`(DRAFT 생성+audit), `GetScoreByID`, `GetScoresByEvaluationItem`, `UpdateScore`(D4 CONFIRMED 불변 가드+status 전이 검증+audit), `SupersedeAndReplaceScore`(CONFIRMED 정정: 신규 INSERT + SUPERSEDED UPDATE + 2 audit, append-only), `SumWeightedByEvaluationItem`(pgtype.Numeric 정밀도, SEC-03), `DetermineGrade`(grade_thresholds 결정적 스캔, fail-closed). `InsertAuditLog`, `Commit`, `Rollback` 포함.
+- **BeginScoreTx pool 재사용** (`internal/store/pg_store.go`): `PgWorkflowStore.pool` 단일 pgx 풀 재사용 — 신규 풀 연결 0건 (SPEC-AX-CTRL-001 / SPEC-AX-EVID-001 / SPEC-AX-EVAL-ITEM-001 동일 패턴).
+- **감사 Recorder 확장** (`internal/audit/recorder.go`): `RecordScoreCreated(ctx, tx AuditTx, scoreID uuid.UUID, evaluationItemID, level, userID string)` / `RecordScoreUpdated(...)` 추가. Decision 2 — resource_id = `scores.id` UUID 직접 대입(surrogate 불필요, EVAL-ITEM-001과 달리 UUID PK).
+- **액션 상수 2종** (`internal/audit/audit.go`): `ActionScoreCreated = "SCORE_CREATED"`, `ActionScoreUpdated = "SCORE_UPDATED"` 추가. 신규 namespace 상수 0건.
+- **에러 센티널 6종** (`internal/errors/errors.go`): `ErrScoreNotFound`, `ErrScoreInvalidInput`, `ErrScoreImmutable`, `ErrScoreInvalidStatus`, `ErrGradeThresholdsUnavailable`, `ErrScoreAuditWriteFailed`, `ErrScoreNotConfirmed` (실질 7종, 연산 단위 별 명확한 구분).
+- **Walking Skeleton 범위**: 데이터 모델 + store 계층 + audit 연계 — **HTTP 엔드포인트 없음, REST/gRPC 핸들러 없음, cmd/server 변경 없음.**
+- **GAN 평가**: iter1 FAIL 46.25 → iter2 PASS 85.25 (DC-UBI-002 audit 원자성·DC-UBI-004 CONFIRMED 불변·SEC-03 pgtype.Numeric 3건 해소); 통합 테스트 `ok store 278.986s`, 커버리지 87.2%; evaluator-active PASS 85.25/100
+
+### Deferred — SPEC-AX-SCORE-001
+
+- HTTP CRUD 엔드포인트 / REST API (점수 생성·조회·집계·등급) — 후속 SPEC
+- 풀 집계 엔진 (깊은 재귀 롤업, score_aggregates 영속, incremental 집계) — 후속 SPEC
+- 풀 등급기준(scoring rubric) 시스템 (룰 엔진, 가점/감점, 계층) — 후속 SPEC
+- `scores.evaluation_item_id → evaluation_items(id)` / `scores.evidence_id → evidences(id)` FK 하드닝 — 후속 SPEC
+- LLM 등급 시뮬레이션 / Recommendation 엔진 — 후속 Python/AI 파이프라인 SPEC
+
+---
+
 ## [Unreleased] - 2026-05-18
 
 ### Added — SPEC-AX-EVAL-ITEM-001 v0.1.3 (경영평가 평가항목 taxonomy Walking Skeleton)
