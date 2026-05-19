@@ -1,6 +1,6 @@
 # SPEC-AX-SCORE-API-001 (Compact) — 경영평가 점수 조회/집계 HTTP API 계층 (Score Query/Aggregation HTTP API Layer)
 
-> v0.1.0 · status draft · TDD · thorough · brownfield · sub-agent. 상세는 spec.md / plan.md / acceptance.md / research.md. (AC=27, §7 edge case=16, §6 OPEN 4건 — strategy phase RESOLVED 대상)
+> v0.1.1 · status completed · TDD · thorough · brownfield · sub-agent. 상세는 spec.md / plan.md / acceptance.md / research.md. (AC=27, §7 edge case=16, §6 4건 RESOLVED — 커밋 8a61193, evaluator 0.9235/TRUST5 PASS)
 
 ## 핵심 consumer-only 계약 [HARD]
 
@@ -8,7 +8,7 @@
 - 신규 DB 마이그레이션 0 (순수 API 계층 — `scores`/`grade_thresholds`는 SCORE-001이 이미 생성)
 - API 자체 audit 0 — mutation 감사는 store `RecordScore*` 동일 TX 전담 (이중 감사 금지, research.md §4.2)
 - TX 진입점 = `store.ScoreStore.BeginScoreTx`(→ `PgWorkflowStore.pool`)만. `postgres.go` 死 스텁 비대상
-- ABAC: `auth.ABACMiddleware(...)(innerMux)` 기존 와이어링(server.go:261)이 innerMux 전체 자동 적용 — server.go ABAC 변경 0
+- ABAC: `RESTAuthzMiddleware`(`authz_middleware.go`/`chain.go:17`) 기존 미들웨어 체인(server.go:261 와이어링)이 innerMux 전체 자동 적용 — server.go ABAC 변경 0 (D2-2: 미들웨어 와이어링 파일, 거부 코드·상수=abac.go:24)
 - 1차 산출물 = SCORE-001 store 7 메서드를 노출하는 최소 REST API + AUTH-003 ABAC 통합
 
 ## 7 엔드포인트 (research.md §11)
@@ -46,7 +46,7 @@ GET `/scores/{id}`(GetScoreByID) · GET `/scores`(GetScoresByEvaluationItem + fi
 |------|-------|
 | `cmd/server/score_handlers.go` | [NEW] ScoreHandler+Routes+7 핸들러+JSON/에러 헬퍼+에러 매핑 (evidence_handlers.go 미러) |
 | `cmd/server/score_handlers_test.go` | [NEW] httptest 핸들러 단위 테스트 |
-| `cmd/server/server.go` | [MODIFY] **라우트 마운트만** (scoreH 필드 + NewScoreHandler + innerMux.Handle 1줄, server.go:257 선례) |
+| `cmd/server/server.go` | [MODIFY] **라우트 마운트만** (scoreH 필드:55 + NewScoreHandler:209 + innerMux.Handle 2줄:263-264, ≈7줄 최소 단위) |
 | `internal/store/store.go`·`score.go` | [EXISTING] ScoreStore/ScoreTx/Score/ScoreUpdate 호출만 — **0 diff** |
 | `internal/errors/errors.go` | [EXISTING] 센티넬 errors.Is 매핑만 — 0 diff |
 | `internal/auth/abac.go`·`rbac.go`·`middleware.go` | [EXISTING] **frozen, 0 diff [HARD]** (permissionMatrix 수정 금지) |

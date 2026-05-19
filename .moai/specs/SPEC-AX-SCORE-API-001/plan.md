@@ -81,7 +81,7 @@ spec.md §2 표를 따른다. Delta 마커:
 | Sprint | 우선순위 | 내용 | REQ |
 |--------|----------|------|-----|
 | S0 | High | **[D2-1 hard-verify 게이트, 차단]** Run 진입 시 `grep -n 'func.*BeginScoreTx' apps/control-plane/internal/store/pg_store.go apps/control-plane/internal/store/store.go` (실재 기대: `pg_store.go:134`+`store.go:255`) 및 `grep -n 'ErrGradeThresholdsUnavailable' apps/control-plane/internal/errors/errors.go` (실재 기대: `errors.go:69`) hard-verify. **미존재/시그니처 불일치 시 consumer-only 전제 붕괴 → 즉시 STOP·재계획**(research.md §2.1/§12 stale 표현 무시, ground-truth 우선). 통과 후: 회귀 baseline(기존 `evidence_handlers.go`·workflow REST 핸들러 테스트 GREEN 확인) + §6 OPEN 4건 strategy RESOLVED 입력 준비 + consumer-only 대상 파일 git 해시 스냅샷(Drift-Guard 기준선) | (전제) |
-| S1 | High | `ScoreHandler` struct + `NewScoreHandler` + `Routes()` 7 라우트 골격 + `writeScoreJSON`/`writeScoreErr`/`scoreErrorBody` 헬퍼 (evidence_handlers.go 미러). server.go 라우트 마운트 1줄 | REQ-SCORE-API-001/002 |
+| S1 | High | `ScoreHandler` struct + `NewScoreHandler` + `Routes()` 7 라우트 골격 + `writeScoreJSON`/`writeScoreErr`/`scoreErrorBody` 헬퍼 (evidence_handlers.go 미러). server.go 라우트 마운트 최소 단위(scoreH 필드+생성자+innerMux.Handle 2줄, ≈7줄) | REQ-SCORE-API-001/002 |
 | S2 | High | 조회 핸들러: handleGetScore(404/400)/handleListScores(filter+pagination clamp/empty list)/handleRollup(numeric 직렬화)/handleGrade(ErrGradeThresholdsUnavailable→404) | REQ-SCORE-API-001 |
 | S3 | High | 변경 핸들러: handleCreateScore(201)/handleUpdateScore(409 immutable)/handleSupersedeScore(409 not-confirmed) + BeginScoreTx→Commit, defer Rollback(committed flag), pre-TX 검증(400) | REQ-SCORE-API-002 |
 | S4 | High | store 에러→HTTP 매핑 표 (`errors.Is` 전 센티넬) + TX rollback 부분커밋 0 + goleak | REQ-SCORE-API-004 |

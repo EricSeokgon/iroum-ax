@@ -7,6 +7,14 @@
 
 ## [Unreleased] - 2026-05-19
 
+### Added — SPEC-AX-SCORE-API-001 v0.1.1 (경영평가 점수 조회/집계 HTTP API 계층)
+
+- **7개 REST 엔드포인트** (`apps/control-plane/cmd/server/score_handlers.go`): `GET /api/v1/scores/{id}` (단건 조회) · `GET /api/v1/scores` (목록, filter+pagination) · `GET /api/v1/scores/rollup` (가중 롤업, pgtype.Numeric 정밀도) · `GET /api/v1/scores/grade` (등급 조회) · `POST /api/v1/scores` (생성, 201) · `PUT /api/v1/scores/{id}` (수정, CONFIRMED 불변 409) · `POST /api/v1/scores/{id}/supersede` (CONFIRMED 정정, 201). Go1.22 ServeMux 최장일치 라우팅.
+- **ScoreHandler** (`cmd/server/score_handlers.go`): `ScoreHandler` struct + `NewScoreHandler(store, logger)` + `Routes() http.Handler`. 핸들러-로컬 ABAC write-role 게이팅(`requireScoreWriteRole`, write={RoleAdmin,RoleAnalyst}), store 에러 센티넬→HTTP 결정적 매핑(`mapStoreErr`), TX orchestration(BeginScoreTx→Commit, defer Rollback committed-flag), pagination clamp(default=50, max=500), 표준 에러 본문 `{"error":{"code","message","field"}}`.
+- **server.go 마운트** (`cmd/server/server.go`, ≈7줄 최소 단위): `scoreH` 필드(L55) + `NewScoreHandler` 생성자(L209) + `innerMux.Handle` 2줄(L263-264: `/api/v1/scores` + `/api/v1/scores/` 서브트리). 기존 `RESTAuthzMiddleware` 와이어링 자동 적용, ABAC 와이어링 0-diff.
+- **consumer-only 0-diff**: `internal/store|audit|auth|errors`·`evidence_handlers.go`·`.moai/db/schema/**` 무변경. 신규 DB 마이그레이션 0건 (순수 API 계층 — `scores`/`grade_thresholds`는 SPEC-AX-SCORE-001이 제공). API 자체 audit 0건 (store `RecordScore*` 동일 TX 전담).
+- **TDD RED-GREEN-REFACTOR**: 커밋 8a61193. evaluator-active PASS 0.9235 / manager-quality TRUST 5 PASS / 커버리지 95.79%.
+
 ### Added — SPEC-AX-SCORE-001 v0.1.3 (경영평가 점수 산출/집계 Walking Skeleton)
 
 - **점수 데이터 모델** (`scores` + `grade_thresholds` 2테이블, `.moai/db/schema/migrations/0004_score_tables.sql`): Decision 1 Option A — 단일 `scores` 테이블 + `level` discriminator(`raw`/`item`/`category`). `id UUID PK DEFAULT uuid_generate_v4()`, `evaluation_item_id VARCHAR(64)` (FK 없는 stub, EVAL-ITEM-001 호환), `evidence_id UUID nullable` (FK 없는 stub, EVID-001 호환), `score_value DECIMAL(6,2)`, `weight DECIMAL(5,4) NULL` (NULL-weight policy: exclude, GAP-01), `grade VARCHAR(2) NULL`, `status VARCHAR(32) DEFAULT 'DRAFT'` CHECK(`DRAFT`/`CONFIRMED`/`SUPERSEDED`, D4 state-machine), `metadata JSONB`, `created_by DEFAULT 'cli-anonymous'`. CHECK 제약 3종(`level`, `status`, `grade`), 인덱스 3개. `grade_thresholds`(scope, letter, min_value, boundary_rule, PK(scope,letter)) — Decision 3, 최소 등급 임계값 테이블(풀 rubric 아님).

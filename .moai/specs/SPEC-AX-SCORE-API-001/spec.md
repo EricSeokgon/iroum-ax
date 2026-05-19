@@ -1,7 +1,7 @@
 ---
 id: SPEC-AX-SCORE-API-001
-version: 0.1.0
-status: draft
+version: 0.1.1
+status: completed
 created: 2026-05-19
 updated: 2026-05-19
 author: ircp
@@ -11,6 +11,7 @@ issue_number: 0
 
 # HISTORY
 
+- 0.1.1 (2026-05-19): Sync — TDD sub-agent 진성 RED-first 구현, 커밋 8a61193. 이중 게이트 PASS: evaluator-active 0.9235 / manager-quality TRUST 5 PASS, 커버리지 95.79%. consumer-only 0-diff 확인(store/audit/auth/migrations 무변경). plan-audit D3-NEW-1 정리(ABACMiddleware↔RESTAuthzMiddleware 출처 정합), 서버 마운트 기술 정밀화(1줄→≈7줄 최소 단위), §6 4건 RESOLVED. 상세: §2.1/§1.5 D2-2 reconciliation 반영.
 - 0.1.0 (2026-05-19): 경영평가 점수 조회/집계 HTTP API 계층(Score Query/Aggregation HTTP API Layer) 첫 초안. SPEC-AX-SCORE-001(완료, v0.1.3)의 `ScoreStore`/`ScoreTx` store+audit 계층 위에 **REST HTTP API 계층만** 추가한다(SPEC-AX-EVID-001 `evidence_handlers.go` 핸들러·라우팅 선례 미러링, research.md §2). 노출 엔드포인트: GET 단건(`/api/v1/scores/{id}`)·GET 목록(filter: evaluation_item_id/level/status + offset/limit)·GET 가중 롤업(`/api/v1/scores/rollup`)·GET 등급(`/api/v1/scores/grade`)·POST 생성·PUT 수정·POST CONFIRMED 정정(supersede). SPEC-AX-AUTH-003 경량 ABAC 통합(viewer=read-only / write 권한 역할은 §6 OPEN #4 미확정 — frozen `rbac.go`에 `evaluator` 역할 부재; cli-anonymous 기본값 + auth-disabled Walking Skeleton fallback). 한국 공공 6제약(데이터 주권/한국어/감사 가능성/망분리/조직 격리/시간 제약) 준수. **본 SPEC은 SPEC-AX-SCORE-001 / SPEC-AX-EVID-001 / SPEC-AX-AUTH-003의 consumer이며 그 코드·스키마·FK·마이그레이션을 일절 변경하지 않는다 — DB 변경 0, 신규 마이그레이션 0(순수 API 계층), 자체 audit 0(store 계층 전담)**. 풀 rubric 시스템, 6번째 시간 제약(KST 업무시간), AUTH-003 모델을 넘는 풀 org-unit 속성 ABAC은 의도적 제외(§5 Exclusions). research.md(Phase 0.5 deep research, 611줄, file:line 근거)가 SSOT. (작성자: ircp)
 
 > Schema note: YAML frontmatter는 SPEC-AX-SCORE-001 / SPEC-AX-EVID-001 / SPEC-AX-AUTH-003과 동일하게 `.claude/skills/moai/workflows/plan.md` Phase 2 (L378)의 8-field canonical 정의(`id, version, status, created, updated, author, priority, issue_number`)를 따른다. `labels`, `created_at` 등 canonical 외 필드는 사용하지 않는다. 본 SPEC의 모든 EARS 요구사항·영향파일·HTTP 계약은 `.moai/specs/SPEC-AX-SCORE-API-001/research.md`(file:line 근거)에 근거하며, 소비 계약 시그니처는 `internal/store/store.go`(`ScoreStore`/`ScoreTx`/`Score`/`ScoreUpdate`), `internal/store/score.go`(`PgScoreTx` 메서드), `internal/errors/errors.go`(에러 센티넬), `cmd/server/evidence_handlers.go`(핸들러 선례), `internal/auth/abac.go`·`rbac.go`·`middleware.go`(ABAC/RBAC), `cmd/server/server.go`(라우트 마운트)에서 직접 검증되었다(phantom API 0건).
@@ -28,7 +29,7 @@ issue_number: 0
 본 SPEC의 1차 산출물은 **SPEC-AX-SCORE-001 store 메서드를 HTTP 엔드포인트로 노출하는 최소 REST API 계층 + ABAC 통합**이다. 데이터 모델·store 메서드·audit 연계·가중 롤업·등급 산출 로직 자체는 SPEC-AX-SCORE-001이 이미 GREEN(완료, v0.1.3)으로 제공한다 — 본 SPEC은 그 **consumer**이며 신규 비즈니스 로직·DB 스키마·마이그레이션을 추가하지 않는다.
 
 - 신규 파일 2개: `cmd/server/score_handlers.go`(`ScoreHandler` + `Routes()` + 핸들러 메서드), `cmd/server/score_handlers_test.go`(테스트)
-- 기존 1개 수정: `cmd/server/server.go` — **라우트 마운트 1줄 + 핸들러 인스턴스화만** (`evidence_handlers.go` → `server.go:257` 선례, research.md §2.3)
+- 기존 1개 수정: `cmd/server/server.go` — **라우트 마운트 최소 단위(필드+생성자+innerMux.Handle 2줄, ≈7줄) + 핸들러 인스턴스화만** (`evidence_handlers.go` → `server.go:257` 선례, research.md §2.3)
 - 7개 엔드포인트: GET 단건 / GET 목록(filter+pagination) / GET 롤업 / GET 등급 / POST 생성 / PUT 수정 / POST 정정(supersede)
 - ABAC 통합: SPEC-AX-AUTH-003 경량 ABAC narrowing-only(viewer=read-only GET, write 권한 역할=§6 OPEN #4 미확정 — POST/PUT/supersede 게이팅)
 - cli-anonymous 기본값 + auth-disabled Walking Skeleton fallback (SPEC-AX-SCORE-001 §1.1, AUTH-003 정합)
@@ -80,7 +81,7 @@ issue_number: 0
 |------|------|-------|------|
 | `apps/control-plane/cmd/server/score_handlers.go` | `ScoreHandler` struct + `NewScoreHandler(...)` + `Routes() http.Handler` + 7개 핸들러 메서드(handleGetScore/handleListScores/handleRollup/handleGrade/handleCreateScore/handleUpdateScore/handleSupersedeScore) + 표준 JSON/에러 헬퍼(`evidence_handlers.go:82-124` 선례 미러). store 에러 센티넬→HTTP status 매핑. | [NEW] | REQ-SCORE-API-001~004 |
 | `apps/control-plane/cmd/server/score_handlers_test.go` | `httptest` 기반 핸들러 단위 테스트 — 7 엔드포인트 정상/에러 경로, ABAC deny 403, 404, 409, 400, pagination clamp, auth-disabled 투과, empty list, consumer-only 경계(API audit 0). | [NEW] | 전체 |
-| `apps/control-plane/cmd/server/server.go` | **라우트 마운트만**(≈7줄 최소 단위): `scoreH` 필드 + `s.scoreH = NewScoreHandler(...)` 생성자 + `innerMux.Handle` **2줄**(`/api/v1/scores` + `/api/v1/scores/` 서브트리 — Go1.22 ServeMux path-param 라우팅 구조적 필수, evidence 단일 라우트와 달리 7라우트는 서브트리 필요) + ko 주석 (`server.go:53/207/261` 선례 미러). ABAC은 기존 `auth.ABACMiddleware(...)(innerMux)`(`server.go:261`)가 innerMux 전체를 감싸 자동 적용 — ABAC 와이어링 변경 **0-diff**. | [MODIFY] | REQ-SCORE-API-003 |
+| `apps/control-plane/cmd/server/server.go` | **라우트 마운트만**(≈7줄 최소 단위): `scoreH` 필드(server.go:55) + `s.scoreH = NewScoreHandler(...)` 생성자(server.go:209) + `innerMux.Handle` **2줄**(server.go:263-264: `/api/v1/scores` + `/api/v1/scores/` 서브트리 — Go1.22 ServeMux path-param 라우팅 구조적 필수, evidence 단일 라우트와 달리 7라우트는 서브트리 필요) + ko 주석 (`server.go:53/207/261` 선례 미러). ABAC은 기존 `RESTAuthzMiddleware`(`authz_middleware.go`/`chain.go:17`) 미들웨어 체인이 innerMux 전체를 감싸 자동 적용(`server.go:261` 기존 와이어링, D2-2 reconciliation: 미들웨어 와이어링 파일) — ABAC 와이어링 변경 **0-diff**. | [MODIFY] | REQ-SCORE-API-003 |
 
 ### 2.2 소비 계약 — 호출만, 무변경 (consumer-only [HARD] §1.4)
 
