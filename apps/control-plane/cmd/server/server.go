@@ -53,6 +53,7 @@ type Server struct {
 	restHandler    *server.RESTHandler
 	evidenceH      *EvidenceHandler
 	scoreH         *ScoreHandler
+	reportH        *ReportHandler
 	dispatcher     *scheduler.CeleryDispatcher
 	grpcServer     *grpc.Server
 	httpServer     *http.Server
@@ -207,6 +208,8 @@ func New(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Server, 
 	// 단계 (i-2): 점수 핸들러 (SPEC-AX-SCORE-API-001) — pgStore가 ScoreStore 구현
 	// consumer-only: store/audit/auth 0-diff, 자체 audit 없음 (store RecordScore* 동일 TX 전담)
 	s.scoreH = NewScoreHandler(pgStore, logger)
+	// SPEC-AX-REPORT-001: 범주 집계 리포트 핸들러 (read-only, pgStore가 ScoreStore+EvalItemStore 동시 구현)
+	s.reportH = NewReportHandler(pgStore, pgStore, logger)
 
 	return s, nil
 }
@@ -262,6 +265,9 @@ func (s *Server) Run(ctx context.Context) error {
 	innerMux.Handle("/api/v1/evidences", s.evidenceH.Routes())
 	innerMux.Handle("/api/v1/scores", s.scoreH.Routes())
 	innerMux.Handle("/api/v1/scores/", s.scoreH.Routes())
+	// SPEC-AX-REPORT-001: 리포트 서브트리 (Go1.22 ServeMux path-param 라우팅 구조적 필수)
+	innerMux.Handle("/api/v1/reports", s.reportH.Routes())
+	innerMux.Handle("/api/v1/reports/", s.reportH.Routes())
 	innerMux.Handle("/", s.restHandler.Mux())
 
 	outerMux.Handle("/", auth.BuildRESTChain(
