@@ -72,6 +72,16 @@ const (
 	// ActionScoreUpdated 점수 행 수정 시 기록 (SPEC-AX-SCORE-001 REQ-SCORE-004)
 	// D2: resource_id = scores.id UUID 직접 대입 (AUD-1 surrogate 미사용)
 	ActionScoreUpdated Action = "SCORE_UPDATED"
+
+	// ActionScoreReviewRequestCreated 평가 검토 요청 생성 시 기록 (SPEC-AX-REVIEW-001 REQ-REVIEW-004)
+	// D2: resource_id = score_review_requests.id UUID 직접 대입 (AUD-1 surrogate 미사용)
+	ActionScoreReviewRequestCreated Action = "SCORE_REVIEW_REQUEST_CREATED"
+	// ActionScoreReviewRequestReviewerAssigned 검토자 할당 (SUBMITTED→UNDER_REVIEW) 시 기록
+	ActionScoreReviewRequestReviewerAssigned Action = "SCORE_REVIEW_REQUEST_REVIEWER_ASSIGNED"
+	// ActionScoreReviewRequestApproved 승인 (UNDER_REVIEW→APPROVED terminal) 시 기록
+	ActionScoreReviewRequestApproved Action = "SCORE_REVIEW_REQUEST_APPROVED"
+	// ActionScoreReviewRequestRejected 반려 (UNDER_REVIEW→REJECTED terminal) 시 기록
+	ActionScoreReviewRequestRejected Action = "SCORE_REVIEW_REQUEST_REJECTED"
 )
 
 // EvalItemAuditNamespace 평가항목 감사 resource_id surrogate 생성용 고정 UUID namespace.

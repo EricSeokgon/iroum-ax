@@ -424,3 +424,117 @@ func scoreDetails(scoreID uuid.UUID, evaluationItemID, level string) ([]byte, er
 	}
 	return b, nil
 }
+
+// reviewRequestDetails 평가 검토 감사 이벤트 details JSON 생성
+// (D2 — score_review_request_id/score_id 포함, 액션-특화 키는 호출자가 추가)
+func reviewRequestDetails(reviewRequestID, scoreID uuid.UUID, extra map[string]string) ([]byte, error) {
+	m := map[string]string{
+		"score_review_request_id": reviewRequestID.String(),
+		"score_id":                scoreID.String(),
+	}
+	for k, v := range extra {
+		m[k] = v
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("recorder: marshal review request details: %w", err)
+	}
+	return b, nil
+}
+
+// RecordScoreReviewRequestCreated SCORE_REVIEW_REQUEST_CREATED 감사 이벤트를 기록 (SPEC-AX-REVIEW-001)
+// 평가 검토 요청 생성과 동일 AuditTx에 audit_logs 1건 (REQ-REVIEW-UBI-002 / REQ-REVIEW-004-E1).
+// D2: resource_id = score_review_requests.id UUID 직접 대입 — uuid.NewSHA1/AUD-1 surrogate 미사용.
+//
+// @MX:ANCHOR: [AUTO] 평가 검토 생성 감사 단일 진입점 — REQ-REVIEW-004 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — D2 직접 UUID 계약 (SPEC-AX-REVIEW-001)
+func (r *Recorder) RecordScoreReviewRequestCreated(ctx context.Context, tx AuditTx, reviewRequestID, scoreID uuid.UUID, userID string) error {
+	details, err := reviewRequestDetails(reviewRequestID, scoreID, nil)
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionScoreReviewRequestCreated,
+		ResourceType: "score_review_request",
+		ResourceID:   reviewRequestID, // D2: 직접 대입, surrogate 금지
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordScoreReviewRequestReviewerAssigned 검토자 할당 감사 이벤트 (SUBMITTED→UNDER_REVIEW)
+// details JSONB에 reviewer_id 포함 (감사 추적용 정보 컬럼).
+//
+// @MX:ANCHOR: [AUTO] 검토자 할당 감사 단일 진입점 — REQ-REVIEW-003-E1 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — 상태 전이 추적 계약
+func (r *Recorder) RecordScoreReviewRequestReviewerAssigned(ctx context.Context, tx AuditTx, reviewRequestID, scoreID uuid.UUID, reviewerID, userID string) error {
+	details, err := reviewRequestDetails(reviewRequestID, scoreID, map[string]string{
+		"reviewer_id": reviewerID,
+	})
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionScoreReviewRequestReviewerAssigned,
+		ResourceType: "score_review_request",
+		ResourceID:   reviewRequestID,
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordScoreReviewRequestApproved 승인 감사 이벤트 (UNDER_REVIEW→APPROVED terminal)
+// details JSONB에 optional comment 포함.
+//
+// @MX:ANCHOR: [AUTO] 평가 검토 승인 감사 단일 진입점 — REQ-REVIEW-003-E2 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — terminal 전이 추적 계약
+func (r *Recorder) RecordScoreReviewRequestApproved(ctx context.Context, tx AuditTx, reviewRequestID, scoreID uuid.UUID, comment, userID string) error {
+	extra := map[string]string{}
+	if comment != "" {
+		extra["comment"] = comment
+	}
+	details, err := reviewRequestDetails(reviewRequestID, scoreID, extra)
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionScoreReviewRequestApproved,
+		ResourceType: "score_review_request",
+		ResourceID:   reviewRequestID,
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordScoreReviewRequestRejected 반려 감사 이벤트 (UNDER_REVIEW→REJECTED terminal)
+// details JSONB에 required rejection_reason + optional comment 포함.
+//
+// @MX:ANCHOR: [AUTO] 평가 검토 반려 감사 단일 진입점 — REQ-REVIEW-003-E3 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — terminal 전이 + reason 추적 계약
+func (r *Recorder) RecordScoreReviewRequestRejected(ctx context.Context, tx AuditTx, reviewRequestID, scoreID uuid.UUID, rejectionReason, comment, userID string) error {
+	extra := map[string]string{
+		"rejection_reason": rejectionReason,
+	}
+	if comment != "" {
+		extra["comment"] = comment
+	}
+	details, err := reviewRequestDetails(reviewRequestID, scoreID, extra)
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionScoreReviewRequestRejected,
+		ResourceType: "score_review_request",
+		ResourceID:   reviewRequestID,
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}

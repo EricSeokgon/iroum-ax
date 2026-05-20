@@ -76,3 +76,30 @@ var ErrScoreAuditWriteFailed = errors.New("score audit write failed")
 // ErrScoreNotConfirmed CONFIRMED 정정(SupersedeAndReplaceScore)을 CONFIRMED 아닌 행에
 // 시도했을 때 반환 (D4 — 정정 대상은 반드시 CONFIRMED여야 함).
 var ErrScoreNotConfirmed = errors.New("score is not in CONFIRMED status; supersede requires CONFIRMED")
+
+// ErrScoreReviewRequestNotFound 요청한 평가 검토 ID가 존재하지 않음 (SPEC-AX-REVIEW-001)
+// GetScoreReviewRequestByID는 pgx.ErrNoRows 대신 이 센티널을 래핑하여 반환 (GAP-03 동형).
+var ErrScoreReviewRequestNotFound = errors.New("score review request not found")
+
+// ErrScoreReviewRequestInvalidInput 평가 검토 입력 검증 실패
+// (uuid.Nil score_id, REJECTED 시 rejection_reason empty 등 — REQ-REVIEW-001-U1)
+// store 계층이 SQL 미실행 후 반환 (fail-closed, score.go:79-97 동형).
+var ErrScoreReviewRequestInvalidInput = errors.New("score review request invalid input")
+
+// ErrScoreReviewRequestInvalidStatus 허용되지 않은 상태 전이 시도 (UBI-004 / REQ-REVIEW-003-S1)
+// APPROVED/REJECTED terminal 또는 SUBMITTED→APPROVED 직접 전이 등.
+// store 계층 validateReviewStatusTransition이 SQL 미실행 후 반환.
+var ErrScoreReviewRequestInvalidStatus = errors.New("score review request invalid status transition")
+
+// ErrScoreReviewRequestNotSubmitted 검토자 할당은 SUBMITTED 상태에만 허용 (Edge E14)
+// AssignReviewer 호출 시 현재 status != 'SUBMITTED'면 반환.
+var ErrScoreReviewRequestNotSubmitted = errors.New("score review request not in SUBMITTED status")
+
+// ErrScoreReviewRequestNotUnderReview 승인/반려는 UNDER_REVIEW 상태에만 허용 (Edge E10/E15)
+// ApproveRequest/RejectRequest 호출 시 현재 status != 'UNDER_REVIEW'면 반환.
+var ErrScoreReviewRequestNotUnderReview = errors.New("score review request not in UNDER_REVIEW status")
+
+// ErrScoreReviewRequestAuditWriteFailed 평가 검토 mutation의 동일-TX audit INSERT 실패
+// (REQ-REVIEW-004-U1 / Edge E16). 호출자가 errors.Is로 식별하여 Rollback하면
+// score_review_requests/audit_logs 양방향 취소 (양방향 원자성).
+var ErrScoreReviewRequestAuditWriteFailed = errors.New("score review request audit write failed")

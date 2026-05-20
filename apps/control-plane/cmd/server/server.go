@@ -54,10 +54,12 @@ type Server struct {
 	evidenceH      *EvidenceHandler
 	scoreH         *ScoreHandler
 	reportH        *ReportHandler
-	dispatcher     *scheduler.CeleryDispatcher
-	grpcServer     *grpc.Server
-	httpServer     *http.Server
-	logger         *zap.Logger
+	// 평가 검토 핸들러 (SPEC-AX-REVIEW-001)
+	reviewH    *ReviewHandler
+	dispatcher *scheduler.CeleryDispatcher
+	grpcServer *grpc.Server
+	httpServer *http.Server
+	logger     *zap.Logger
 	// tracerShutdown — OTel TracerProvider graceful shutdown 클로저 (Sprint 2)
 	// @MX:NOTE: [AUTO] InitTracer가 반환한 shutdown 클로저 — server.shutdown() defer 체인에 등록
 	tracerShutdown func(context.Context) error
@@ -210,6 +212,8 @@ func New(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Server, 
 	s.scoreH = NewScoreHandler(pgStore, logger)
 	// SPEC-AX-REPORT-001: 범주 집계 리포트 핸들러 (read-only, pgStore가 ScoreStore+EvalItemStore 동시 구현)
 	s.reportH = NewReportHandler(pgStore, pgStore, logger)
+	// SPEC-AX-REVIEW-001: 평가 검토 핸들러 (cross-store 2-TX, pgStore가 ScoreReviewRequestStore+ScoreStore 동시 구현)
+	s.reviewH = NewReviewHandler(pgStore, pgStore, logger)
 
 	return s, nil
 }
@@ -268,6 +272,9 @@ func (s *Server) Run(ctx context.Context) error {
 	// SPEC-AX-REPORT-001: 리포트 서브트리 (Go1.22 ServeMux path-param 라우팅 구조적 필수)
 	innerMux.Handle("/api/v1/reports", s.reportH.Routes())
 	innerMux.Handle("/api/v1/reports/", s.reportH.Routes())
+	// SPEC-AX-REVIEW-001: 평가 검토 서브트리 (cross-store 2-TX + sub-resource 라우트)
+	innerMux.Handle("/api/v1/reviews", s.reviewH.Routes())
+	innerMux.Handle("/api/v1/reviews/", s.reviewH.Routes())
 	innerMux.Handle("/", s.restHandler.Mux())
 
 	outerMux.Handle("/", auth.BuildRESTChain(

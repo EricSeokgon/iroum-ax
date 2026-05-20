@@ -303,3 +303,94 @@ type ScoreTx interface {
 	// Rollback 현재 트랜잭션을 롤백 — defer로 호출하는 것이 안전, Commit 후 무시
 	Rollback(ctx context.Context) error
 }
+
+// ScoreReviewRequest 평가 검토 요청 도메인 엔티티 — score_review_requests 테이블 1행에 대응
+// (SPEC-AX-REVIEW-001). 상태 머신: SUBMITTED→UNDER_REVIEW→{APPROVED|REJECTED}.
+// APPROVED/REJECTED는 terminal — 어떤 전이도 허용되지 않는다 (UBI-004).
+// 필드 순서(fieldalignment 정렬): map(8B) → time.Time × 2 → 포인터들 → 문자열들 → UUID들
+type ScoreReviewRequest struct {
+	// Metadata 임의 메타데이터 (JSONB opaque placeholder)
+	Metadata map[string]any
+	// CreatedAt 생성 시각 (TIMESTAMPTZ)
+	CreatedAt time.Time
+	// UpdatedAt 갱신 시각 (TIMESTAMPTZ)
+	UpdatedAt time.Time
+	// AssignedReviewerID 검토자 식별자 (정보/감사용, ABAC 결정과 무관). nil 허용
+	AssignedReviewerID *string
+	// RejectionReason 반려 사유 (REJECTED 상태일 때만 non-empty). nil 허용
+	RejectionReason *string
+	// Comment 자유 코멘트 (모든 상태에서 nil 허용)
+	Comment *string
+	// Status 상태 — 'SUBMITTED'|'UNDER_REVIEW'|'APPROVED'|'REJECTED'
+	Status string
+	// CreatedBy 생성자 (auth-disabled 시 'cli-anonymous')
+	CreatedBy string
+	// UpdatedBy 최종 갱신자
+	UpdatedBy string
+	// ID 본 평가 검토 요청 PK
+	ID uuid.UUID
+	// ScoreID 검토 대상 점수 UUID (FK-less stub — SCORE-001 §1.4 동형)
+	ScoreID uuid.UUID
+}
+
+// ScoreReviewRequestStore 평가 검토 요청 영속성 최상위 인터페이스 (SPEC-AX-REVIEW-001)
+// ScoreStore 패턴을 미러링하여 BeginScoreReviewRequestTx 트랜잭션 진입점만 제공한다.
+//
+// @MX:ANCHOR: [AUTO] 평가 검토 도메인 단일 DB 접근 계약 — 핸들러/통합 테스트/recorder 3곳 이상 호출 예정
+// @MX:REASON: 기존 ScoreStore와 동일 — 단일 pool 싱글톤 재사용. 신규 pgxpool 생성 금지.
+type ScoreReviewRequestStore interface {
+	// BeginScoreReviewRequestTx 새로운 평가 검토 트랜잭션을 시작하여 반환
+	BeginScoreReviewRequestTx(ctx context.Context) (ScoreReviewRequestTx, error)
+}
+
+// ScoreReviewRequestTx 단일 데이터베이스 트랜잭션 내 평가 검토 쓰기/조회 연산 인터페이스
+// 모든 mutation 메서드는 동일 TX에 audit_logs 1건을 INSERT (REQ-REVIEW-UBI-002 동일-TX 원자성).
+// AssignReviewer/ApproveRequest/RejectRequest는 SELECT FOR UPDATE 비관 락 + state-machine 가드.
+//
+// userID 파라미터: REQ-REVIEW-UBI-003 정합. 핸들러에서 principal.id(auth-enabled) 또는
+// "cli-anonymous"(auth-disabled)를 전달해 created_by/updated_by + audit_logs.user_id에 일관 영속화.
+//
+// @MX:ANCHOR: [AUTO] AC-REVIEW-001-1 / AC-REVIEW-UBI-002 원자성 계약의 핵심
+// @MX:REASON: pgx 구현체(PgScoreReviewRequestTx) + 핸들러 TX orchestration + recorder 등 3곳 이상에서 사용
+type ScoreReviewRequestTx interface {
+	// InsertScoreReviewRequest score_review_requests 테이블에 새 SUBMITTED 행을 삽입하고 UUID 반환
+	// 검증 실패 시(uuid.Nil scoreID 등) SQL 미실행 후 ErrScoreReviewRequestInvalidInput 래핑
+	// userID: created_by/updated_by 컬럼 + audit_logs.user_id에 일관 영속 (UBI-003)
+	InsertScoreReviewRequest(
+		ctx context.Context,
+		scoreID uuid.UUID,
+		comment string,
+		metadata map[string]any,
+		userID string,
+	) (uuid.UUID, error)
+	// GetScoreReviewRequestByID 평가 검토 요청을 id로 단건 조회
+	// 미존재 시 ErrScoreReviewRequestNotFound 래핑 (raw pgx.ErrNoRows 누출 금지 — GAP-03)
+	GetScoreReviewRequestByID(ctx context.Context, id uuid.UUID) (*ScoreReviewRequest, error)
+	// ListScoreReviewRequests 필터(status optional) + offset/limit 페이지네이션으로 조회
+	// 정렬: created_at DESC. 빈 결과는 빈 슬라이스 반환 (error 아님 — UBI-004 E8)
+	ListScoreReviewRequests(
+		ctx context.Context,
+		status string,
+		limit, offset int,
+	) ([]*ScoreReviewRequest, error)
+	// CountScoreReviewRequests 필터(status optional)에 해당하는 전체 행 수 반환
+	// pagination total 정확 계산용 (AC-REVIEW-002-3 — limit/offset 적용 전 전체 카운트)
+	CountScoreReviewRequests(ctx context.Context, status string) (int64, error)
+	// AssignReviewer SUBMITTED→UNDER_REVIEW 전이 + assigned_reviewer_id 업데이트
+	// SELECT FOR UPDATE pessimistic lock + validateReviewStatusTransition 이중 방어 (§A.6)
+	// userID: updated_by 컬럼 + audit_logs.user_id에 일관 영속 (UBI-003)
+	AssignReviewer(ctx context.Context, id uuid.UUID, reviewerID, userID string) error
+	// ApproveRequest UNDER_REVIEW→APPROVED terminal 전이 (comment optional)
+	// userID: updated_by 컬럼 + audit_logs.user_id에 일관 영속 (UBI-003)
+	ApproveRequest(ctx context.Context, id uuid.UUID, comment, userID string) error
+	// RejectRequest UNDER_REVIEW→REJECTED terminal 전이 (rejection_reason required)
+	// rejection_reason empty 시 SQL 미실행 후 ErrScoreReviewRequestInvalidInput 래핑 (§A.5 Layer 1)
+	// userID: updated_by 컬럼 + audit_logs.user_id에 일관 영속 (UBI-003)
+	RejectRequest(ctx context.Context, id uuid.UUID, rejectionReason, comment, userID string) error
+	// InsertAuditLog 현재 트랜잭션 내에 감사 이벤트를 삽입 (Recorder가 호출)
+	InsertAuditLog(ctx context.Context, e *audit.Event) error
+	// Commit 현재 트랜잭션을 커밋
+	Commit(ctx context.Context) error
+	// Rollback 현재 트랜잭션을 롤백 (defer 안전, Commit 후 no-op)
+	Rollback(ctx context.Context) error
+}

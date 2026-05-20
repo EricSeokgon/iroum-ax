@@ -147,6 +147,31 @@ func (s *PgWorkflowStore) BeginScoreTx(ctx context.Context) (ScoreTx, error) {
 	}, nil
 }
 
+// BeginScoreReviewRequestTx 새로운 평가 검토 요청 트랜잭션을 시작하여 PgScoreReviewRequestTx를 반환
+// 기존 단일 pgx pool(SPEC-AX-REVIEW-001 REQ-REVIEW-UBI-001 데이터 주권)을 재사용한다.
+// 신규 pool을 생성하지 않으며, postgres.go(死 스텁)는 대상이 아니다.
+// 반환된 ScoreReviewRequestTx는 반드시 Commit 또는 Rollback 중 하나로 종료해야 함.
+//
+// @MX:ANCHOR: [AUTO] 평가 검토 도메인 유일 TX 진입점 — 핸들러/통합 테스트/recorder 3곳 이상에서 호출
+// @MX:REASON: 단일 pool 싱글톤 재사용 계약 — 신규 pgxpool 생성 금지, pg_store.go:134 BeginScoreTx 패턴 정확 미러
+func (s *PgWorkflowStore) BeginScoreReviewRequestTx(ctx context.Context) (ScoreReviewRequestTx, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return nil, fmt.Errorf("BeginScoreReviewRequestTx 실패: %w", stderrors.ErrPgxPoolExhausted)
+	}
+	// REQ-REVIEW-UBI-002: PgScoreReviewRequestTx에 Recorder를 주입하여 mutation
+	// (Insert/AssignReviewer/Approve/Reject)이 동일 pgx.Tx에 entity+audit를 원자적으로 기록한다.
+	// authEnabled=true 주입: store 계층의 resolveUserID가 이미 빈 문자열을 'cli-anonymous'로
+	// 변환하므로 recorder는 그 결과를 그대로 통과시켜야 한다 (UBI-003 D1 fix).
+	// authEnabled=false로 주입하면 recorder.resolveUserID가 모든 userID를 'cli-anonymous'로
+	// 덮어쓰기 → principal.id 영속 손실 (Phase 3 iteration 1 D1 root cause).
+	return &PgScoreReviewRequestTx{
+		tx:       tx,
+		logger:   s.logger,
+		recorder: audit.NewRecorder(true),
+	}, nil
+}
+
 // PgWorkflowTx pgx.Tx 래퍼 — WorkflowTx 인터페이스 구현
 // 단일 PostgreSQL 트랜잭션 내에서 모든 쓰기 연산을 수행
 //
