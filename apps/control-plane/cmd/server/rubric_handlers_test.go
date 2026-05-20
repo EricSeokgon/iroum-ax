@@ -28,8 +28,11 @@ import (
 	"go.uber.org/goleak"
 	"go.uber.org/zap/zaptest"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/audit"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/auth"
+	apperrors "github.com/ircp/iroum-ax/apps/control-plane/internal/errors"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/store"
 )
 
@@ -390,21 +393,20 @@ func TestPOST_Rubrics_ViewerForbidden_403(t *testing.T) {
 func TestUpdateRubric_RaceConcurrent_UniqueViolationMaps409(t *testing.T) {
 	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
 
-	// Phase A: handler-level 시뮬레이션 — Phase C testcontainers에서 실제 race 검증
-	// fake updateErr가 pgconn.PgError SQLSTATE 23505 매핑 시뮬레이션
+	// Phase C GREEN: pgconn.PgError{Code:"23505",ConstraintName:"rubrics_active_unique_idx"}
+	// → mapRubricStoreErr가 SQLSTATE 분기로 409 한국어 응답 매핑
 	id := uuid.New()
 	tx := &fakeRubricTx{
 		getByIDResult: buildFakeRubric("draft"),
-		// Phase C GREEN: pgconn.PgError{Code:"23505",ConstraintName:"rubrics_active_unique_idx"}
-		// → mapRubricStoreErr가 ErrRubricInvalidStatus로 매핑 → 409
+		// race window: pre-check 통과 (countResult=0) 후 UpdateRubric 시점에 DB 23505 violation
+		updateErr: &pgconn.PgError{Code: "23505", ConstraintName: "rubrics_active_unique_idx"},
 	}
 	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
 
 	target := "/api/v1/rubrics/" + id.String()
 	body := `{"name":"safety-v1","scope":"kepco-safety","status":"active"}`
 	code, _ := doRubricReq(t, h, "PUT", target, body, "iroum-ax:admin")
-	// Phase A: 503 (handler 미구현) — Phase C: 409 (race SQLSTATE 23505 → mapRubricStoreErr → 409)
-	require.NotEqual(t, http.StatusOK, code, "race 시 200 불가 — Phase A 503 / Phase C 409")
+	require.Equal(t, http.StatusConflict, code, "race SQLSTATE 23505 → mapRubricStoreErr → 409")
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -667,17 +669,14 @@ func TestPOST_RubricsAddCriterion_EvalItemNotExist_404(t *testing.T) {
 
 	id := uuid.New()
 	tx := &fakeRubricTx{getByIDResult: buildFakeRubric("draft")}
-	// EvalItem 미존재 → ErrEvalItemNotFound 시뮬레이션
-	evalTx := &fakeRubricEvalItemTx{
-		// Phase C GREEN: getErr = stderrors.ErrEvalItemNotFound → 404 매핑
-	}
+	// Phase C GREEN: EvalItem 미존재 → ErrEvalItemNotFound → 404 매핑
+	evalTx := &fakeRubricEvalItemTx{getErr: apperrors.ErrEvalItemNotFound}
 	h := newTestRubricHandler(t, tx, evalTx, &fakeScoreTx{})
 
 	target := "/api/v1/rubrics/" + id.String() + "/criteria"
 	body := `{"evaluation_item_id":"` + uuid.New().String() + `","weight":0.5}`
 	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:admin")
-	// Phase A: 503 (미구현) — Phase C: 404 (cross-store EvalItem 미존재)
-	require.NotEqual(t, http.StatusCreated, code, "Phase A 503 / Phase C 404 — EvalItem 미존재")
+	require.Equal(t, http.StatusNotFound, code, "Phase C: cross-store EvalItem 미존재 → 404")
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -692,14 +691,15 @@ func TestArchiveRubric_DBCheckViolation_500MapsCorrectly(t *testing.T) {
 	tx := &fakeRubricTx{
 		// Phase C GREEN: archiveErr = pgconn.PgError{Code:"23514", ConstraintName:"rubrics_archive_reason_chk"}
 		// → mapRubricStoreErr가 500 INTERNAL로 매핑 (handler-side validation bypass 시 DB layer 차단)
+		archiveErr: &pgconn.PgError{Code: "23514", ConstraintName: "rubrics_archive_reason_chk"},
 	}
 	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
 
 	target := "/api/v1/rubrics/" + id.String() + "/archive"
 	body := `{"archive_reason":"valid reason"}`
 	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:admin")
-	// Phase A: 503 — Phase C: 200 정상 또는 DB violation 시 500
-	require.NotEqual(t, http.StatusCreated, code)
+	require.Equal(t, http.StatusInternalServerError, code,
+		"Phase C: DB CHECK violation (23514, non-23505/23P01) → 500 INTERNAL")
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -757,14 +757,15 @@ func TestPOST_RubricsApply_ScoreOutOfAllBands_400(t *testing.T) {
 	rubricTx := &fakeRubricTx{
 		getByIDResult: buildFakeRubric("active"),
 		// Phase C GREEN: ApplyRubric returns ErrRubricInvalidInput → mapRubricStoreErr → 400
+		applyErr: apperrors.ErrRubricInvalidInput,
 	}
 	h := newTestRubricHandler(t, rubricTx, &fakeRubricEvalItemTx{}, scoreTx)
 
 	target := "/api/v1/rubrics/" + id.String() + "/apply"
 	body := `{"score_id":"` + scoreID.String() + `"}`
 	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:viewer")
-	// Phase A: 503 — Phase C: 400 (fail-closed)
-	require.NotEqual(t, http.StatusOK, code, "score 모든 band 밖 → 400 (Phase C fail-closed)")
+	require.Equal(t, http.StatusBadRequest, code,
+		"Phase C: score 모든 band 밖 → ErrRubricInvalidInput → 400")
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -813,15 +814,20 @@ func TestPOST_RubricsArchivedRubricMutation_409(t *testing.T) {
 	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
 
 	id := uuid.New()
+	// EvalItem 검증 통과 (cross-store TX-1 OK)
+	evalTx := &fakeRubricEvalItemTx{
+		getResult: &store.EvalItem{ID: uuid.New().String(), DisplayName: "item-x"},
+	}
 	tx := &fakeRubricTx{
 		getByIDResult: buildFakeRubric("archived"),
 		// Phase C GREEN: AddCriterion이 ErrRubricArchived 반환 → mapRubricStoreErr → 409
+		addCriterionErr: apperrors.ErrRubricArchived,
 	}
-	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+	h := newTestRubricHandler(t, tx, evalTx, &fakeScoreTx{})
 
 	target := "/api/v1/rubrics/" + id.String() + "/criteria"
 	body := `{"evaluation_item_id":"` + uuid.New().String() + `","weight":0.2}`
 	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:admin")
-	// Phase A: 503 — Phase C: 409 (archived terminal 불변)
-	require.NotEqual(t, http.StatusCreated, code, "archived 상태 mutation → 409 (Phase C)")
+	require.Equal(t, http.StatusConflict, code,
+		"Phase C: archived terminal 불변 → ErrRubricArchived → 409")
 }

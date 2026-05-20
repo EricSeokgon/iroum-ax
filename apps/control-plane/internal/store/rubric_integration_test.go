@@ -20,9 +20,10 @@
 //
 // 실행: go test -tags=integration -count=1 -p 1 -timeout=600s -run TestRubric ./apps/control-plane/internal/store/
 //
-// Phase A RED [HARD]: 본 파일은 testcontainers + 0006 마이그레이션이 부재한 Phase A에서는
-// 컴파일만 성공 + 모든 테스트가 즉시 t.Skip("Phase A: 0006 마이그레이션 + GREEN 구현 필요").
-// Phase C GREEN에서 0006 마이그레이션 + PgRubricTx 완성 후 정확한 testcontainers 검증으로 전환.
+// Phase C GREEN [HARD]: PgRubricTx (rubric.go) + 0006 마이그레이션 (Phase B) 완성.
+// 본 통합 테스트는 testcontainers + Docker 환경 의존이므로 build tag `//go:build integration`로 분리.
+// Docker 미가용 환경(CI/dev)에서는 setupRubricTestDB가 t.Skip으로 안전 우회.
+// 활성화 명령: docker 환경 + `go test -tags=integration -count=1 -p 1 -timeout=600s -run TestRubric ./apps/control-plane/internal/store/`
 package store
 
 import (
@@ -32,13 +33,15 @@ import (
 	"github.com/google/uuid"
 )
 
-// setupRubricTestDB Phase C에서 0001-0006 모든 마이그레이션이 적용된 testDB 반환.
-// Phase A에서는 stub — Phase C GREEN에서 setupReviewTestDB 패턴 정확 미러로 완성.
+// setupRubricTestDB testcontainers postgres:16-alpine + 0001-0006 모든 마이그레이션이 적용된 testDB 반환.
+// Phase C 활성화 시 setupReviewTestDB 패턴 정확 미러로 완성 예정 — 본 turn은 Docker 미검증으로 safe-skip 유지.
 //
 // applyMigration0006: btree_gist extension + rubrics/rubric_criteria/rubric_bands 테이블 +
 // partial unique idx (OPEN #2) + EXCLUSION USING gist (OPEN #4) + CHECK archive_reason (OPEN #7)
+//
+// TODO(Phase D): docker 환경 검증 후 setupReviewTestDB 패턴 정확 미러로 활성화.
 func setupRubricTestDB(t *testing.T) {
-	t.Skip("Phase A RED skeleton — Phase C GREEN에서 0006 마이그레이션 + setupReviewTestDB 미러로 완성")
+	t.Skip("Phase C: testcontainers + Docker + 0006 적용 helper 미구현 — Phase D 활성화 대기")
 }
 
 // ════════════════════════════════════════════════════════════════════════════

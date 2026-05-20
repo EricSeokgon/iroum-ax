@@ -55,7 +55,9 @@ type Server struct {
 	scoreH         *ScoreHandler
 	reportH        *ReportHandler
 	// 평가 검토 핸들러 (SPEC-AX-REVIEW-001)
-	reviewH    *ReviewHandler
+	reviewH *ReviewHandler
+	// 등급 rubric 핸들러 (SPEC-AX-RUBRIC-001, cross-store 3-store 주입)
+	rubricH    *RubricHandler
 	dispatcher *scheduler.CeleryDispatcher
 	grpcServer *grpc.Server
 	httpServer *http.Server
@@ -214,6 +216,8 @@ func New(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Server, 
 	s.reportH = NewReportHandler(pgStore, pgStore, logger)
 	// SPEC-AX-REVIEW-001: 평가 검토 핸들러 (cross-store 2-TX, pgStore가 ScoreReviewRequestStore+ScoreStore 동시 구현)
 	s.reviewH = NewReviewHandler(pgStore, pgStore, logger)
+	// SPEC-AX-RUBRIC-001: 등급 rubric 핸들러 (pgStore가 RubricStore+EvalItemStore+ScoreStore 동시 구현)
+	s.rubricH = NewRubricHandler(pgStore, pgStore, pgStore, logger)
 
 	return s, nil
 }
@@ -275,6 +279,9 @@ func (s *Server) Run(ctx context.Context) error {
 	// SPEC-AX-REVIEW-001: 평가 검토 서브트리 (cross-store 2-TX + sub-resource 라우트)
 	innerMux.Handle("/api/v1/reviews", s.reviewH.Routes())
 	innerMux.Handle("/api/v1/reviews/", s.reviewH.Routes())
+	// SPEC-AX-RUBRIC-001: 등급 rubric 서브트리 (9 엔드포인트, ServeMux 최장일치 — 구체 경로 우선)
+	innerMux.Handle("/api/v1/rubrics", s.rubricH.Routes())
+	innerMux.Handle("/api/v1/rubrics/", s.rubricH.Routes())
 	innerMux.Handle("/", s.restHandler.Mux())
 
 	outerMux.Handle("/", auth.BuildRESTChain(
