@@ -12,14 +12,14 @@
 
 ## 1. 마일스톤 매핑 (Plan M0-M5 → Tasks)
 
-| Plan Milestone | Tasks | Tasks 개수 |
-|----------------|-------|-----------|
-| M0 RED — 테스트 골격 + 인터페이스 정의 | T-RED-001 ~ T-RED-033 + T-IFACE-001 ~ T-IFACE-003 | 36 |
-| M1 GREEN — 0006 마이그레이션 + store 구현 | T-GREEN-001 ~ T-GREEN-006 | 6 |
-| M2 GREEN — HTTP API 핸들러 + ABAC + apply 엔진 | T-GREEN-007 ~ T-GREEN-011 | 5 |
-| M3 GREEN — server.go 마운트 + 통합 | T-GREEN-012 | 1 |
-| M4 REFACTOR — 품질 보강 + TRUST 5 | T-REFACTOR-001 ~ T-REFACTOR-005 | 5 |
-| M5 Drift-Guard 검증 | T-VERIFY-001 ~ T-VERIFY-003 | 3 |
+| Plan Milestone | Tasks | Tasks 개수 | 상태 |
+|----------------|-------|-----------|------|
+| M0 RED — 테스트 골격 + 인터페이스 정의 | T-RED-001 ~ T-RED-033 + T-IFACE-001 ~ T-IFACE-003 | 36 | ✅ DONE (commit f0a4b89) |
+| M1 GREEN — 0006 마이그레이션 + store 구현 | T-GREEN-001 ~ T-GREEN-006 | 6 | ✅ DONE (commit 19f0ed8) |
+| M2 GREEN — HTTP API 핸들러 + ABAC + apply 엔진 | T-GREEN-007 ~ T-GREEN-011 | 5 | ✅ DONE (commit 681f1c1) |
+| M3 GREEN — server.go 마운트 + 통합 | T-GREEN-012 | 1 | ✅ DONE (commit 681f1c1) |
+| M4 REFACTOR — 품질 보강 + TRUST 5 | T-REFACTOR-001 ~ T-REFACTOR-005 | 5 | ✅ DONE (commit 9e62411 iter2 Craft fix) |
+| M5 Drift-Guard 검증 | T-VERIFY-001 ~ T-VERIFY-003 | 3 | ✅ DONE (frozen 0-diff EXIT 0 × 4 phases) |
 
 ---
 
