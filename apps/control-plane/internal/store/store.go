@@ -394,3 +394,158 @@ type ScoreReviewRequestTx interface {
 	// Rollback 현재 트랜잭션을 롤백 (defer 안전, Commit 후 no-op)
 	Rollback(ctx context.Context) error
 }
+
+// Rubric 등급 rubric 도메인 엔티티 — rubrics 테이블 1행에 대응 (SPEC-AX-RUBRIC-001)
+// 상태 머신: draft → active → archived (terminal). archived → 모든 전이 거부 (UBI-004).
+// archive_reason은 archived 상태 시 필수 (OPEN #7 dual defense — handler + DB CHECK).
+// 필드 순서(fieldalignment 정렬): map(8B) → time.Time × 2 → 문자열들 → int → UUID
+type Rubric struct {
+	// Metadata 임의 메타데이터 (JSONB opaque placeholder)
+	Metadata map[string]any
+	// CreatedAt 생성 시각 (TIMESTAMPTZ)
+	CreatedAt time.Time
+	// UpdatedAt 갱신 시각 (TIMESTAMPTZ)
+	UpdatedAt time.Time
+	// Name rubric 이름 (NOT NULL, VARCHAR(64))
+	Name string
+	// Scope 적용 범위 식별자 (nullable VARCHAR(64), 예: 'default'/'kepco-safety')
+	Scope string
+	// Status 상태 — 'draft'|'active'|'archived'
+	Status string
+	// ArchiveReason archived 시 필수 (OPEN #7 dual defense)
+	ArchiveReason string
+	// CreatedBy 생성자 (auth-disabled 시 'cli-anonymous')
+	CreatedBy string
+	// UpdatedBy 최종 갱신자
+	UpdatedBy string
+	// Version rubric version (default 1, clone-new-version 시 +1)
+	Version int
+	// ID rubric PK
+	ID uuid.UUID
+}
+
+// RubricCriterion 등급 rubric 평가 기준 — rubric_criteria 테이블 1행에 대응
+// rubric_id FK는 동일 0006 마이그레이션 내부 / evaluation_item_id는 FK-less stub (SCORE-001 §1.4 동형)
+// 필드 순서(fieldalignment 정렬): time.Time → UUID × 3 → numeric
+type RubricCriterion struct {
+	// CreatedAt 생성 시각
+	CreatedAt time.Time
+	// EvaluationItemID 평가항목 식별자 (FK-less stub UUID stored)
+	EvaluationItemID uuid.UUID
+	// ID criterion PK
+	ID uuid.UUID
+	// RubricID 소유 rubric FK
+	RubricID uuid.UUID
+	// Weight 가중치 0.0-1.0 (NUMERIC(5,4))
+	Weight float64
+}
+
+// RubricBand 등급 rubric 등급 구간 — rubric_bands 테이블 1행에 대응
+// OPEN #4 dual defense — EXCLUSION USING gist + handler pre-check.
+// 경계 inclusive ('[]') — min_score <= scoreValue <= max_score
+// 필드 순서(fieldalignment 정렬): time.Time → 문자열 → UUID × 2 → numeric × 2
+type RubricBand struct {
+	// CreatedAt 생성 시각
+	CreatedAt time.Time
+	// Letter 등급 문자 (예: 'S'|'A'|'B'|'C'|'D')
+	Letter string
+	// ID band PK
+	ID uuid.UUID
+	// RubricID 소유 rubric FK
+	RubricID uuid.UUID
+	// MinScore 구간 최소값 (inclusive)
+	MinScore float64
+	// MaxScore 구간 최대값 (inclusive)
+	MaxScore float64
+}
+
+// RubricStore 등급 rubric 영속성 최상위 인터페이스 (SPEC-AX-RUBRIC-001)
+// ScoreReviewRequestStore 패턴을 미러링하여 BeginRubricTx 트랜잭션 진입점만 제공한다.
+//
+// @MX:ANCHOR: [AUTO] 등급 rubric 도메인 단일 DB 접근 계약 — 핸들러/통합 테스트/recorder 3곳 이상 호출 예정
+// @MX:REASON: 기존 ScoreReviewRequestStore와 동일 — 단일 pool 싱글톤 재사용. 신규 pgxpool 생성 금지.
+type RubricStore interface {
+	// BeginRubricTx 새로운 등급 rubric 트랜잭션을 시작하여 반환
+	BeginRubricTx(ctx context.Context) (RubricTx, error)
+}
+
+// RubricTx 단일 데이터베이스 트랜잭션 내 등급 rubric 쓰기/조회 연산 인터페이스
+// 모든 mutation 메서드는 동일 TX에 audit_logs 1건을 INSERT (UBI-002 동일-TX 원자성).
+// ApplyRubric는 read-only — audit row 0건 (OPEN #6 read-only no-audit, REPORT-001 선례 미러).
+//
+// userID 파라미터: REVIEW-001 D1 iter2 lesson pre-applied. 핸들러에서 principal.id(auth-enabled)
+// 또는 "cli-anonymous"(auth-disabled)를 전달해 created_by/updated_by + audit_logs.user_id에
+// 일관 영속화. 모든 mutation 메서드는 처음부터 userID 파라미터 보유.
+//
+// @MX:ANCHOR: [AUTO] 등급 rubric 원자성 계약의 핵심 — 핸들러 TX orchestration + recorder 등 3곳 이상
+// @MX:REASON: ScoreReviewRequestTx 동형 — mutation 5종은 동일 TX에 entity+audit, ApplyRubric은 read-only no-audit (OPEN #6)
+type RubricTx interface {
+	// InsertRubric rubrics 테이블에 새 draft 행 삽입 + RUBRIC_CREATED audit 동일 TX
+	// userID: created_by/updated_by + audit_logs.user_id (UBI-003 일관 영속)
+	InsertRubric(
+		ctx context.Context,
+		name, scope string,
+		metadata map[string]any,
+		userID string,
+	) (uuid.UUID, error)
+	// GetRubricByID rubric PK로 단건 조회 — 미존재 시 ErrRubricNotFound 래핑
+	GetRubricByID(ctx context.Context, id uuid.UUID) (*Rubric, error)
+	// ListRubrics 필터(status/scope optional) + offset/limit 페이지네이션
+	ListRubrics(
+		ctx context.Context,
+		status, scope string,
+		limit, offset int,
+	) ([]*Rubric, error)
+	// CountRubrics 필터에 해당하는 전체 행 수 반환 (pagination total용)
+	CountRubrics(ctx context.Context, status, scope string) (int64, error)
+	// UpdateRubric rubric 메타/상태 부분 수정 + RUBRIC_UPDATED audit (OPEN #5 active 직접 편집 허용)
+	// OPEN #2: draft→active 전이 시 (name, scope) 중복 active 차단 (handler pre-check + DB partial unique idx)
+	// userID: updated_by + audit_logs.user_id (UBI-003)
+	UpdateRubric(
+		ctx context.Context,
+		id uuid.UUID,
+		name, scope, status string,
+		metadata map[string]any,
+		userID string,
+	) error
+	// ArchiveRubric active → archived terminal 전이 + RUBRIC_ARCHIVED audit + archive_reason 필수
+	// OPEN #7 dual defense: handler validation pre-store + DB CHECK constraint
+	// userID: updated_by + audit_logs.user_id (UBI-003)
+	ArchiveRubric(ctx context.Context, id uuid.UUID, archiveReason, userID string) error
+	// AddCriterion rubric_criteria 행 추가 + RUBRIC_CRITERION_ADDED audit
+	// archived rubric에 추가 시 ErrRubricArchived (terminal 불변)
+	// weight 0.0-1.0 범위 검사는 store 단계, 합산 1.0 초과 검사는 handler 단계 (OPEN #3)
+	// userID: audit_logs.user_id (UBI-003)
+	AddCriterion(
+		ctx context.Context,
+		rubricID, evaluationItemID uuid.UUID,
+		weight float64,
+		userID string,
+	) (uuid.UUID, error)
+	// AddBand rubric_bands 행 추가 + RUBRIC_BAND_ADDED audit
+	// OPEN #4 dual defense: handler pre-check overlap + DB EXCLUSION USING gist
+	// archived rubric에 추가 시 ErrRubricArchived
+	// userID: audit_logs.user_id (UBI-003)
+	AddBand(
+		ctx context.Context,
+		rubricID uuid.UUID,
+		letter string,
+		minScore, maxScore float64,
+		userID string,
+	) (uuid.UUID, error)
+	// GetCriteriaByRubric 동일 rubric의 모든 criteria 반환 (weight sum 검증용, OPEN #3)
+	GetCriteriaByRubric(ctx context.Context, rubricID uuid.UUID) ([]*RubricCriterion, error)
+	// GetBandsByRubric 동일 rubric의 모든 bands 반환 (overlap 검사용 + apply linear scan용)
+	GetBandsByRubric(ctx context.Context, rubricID uuid.UUID) ([]*RubricBand, error)
+	// ApplyRubric scoreValue → 등급 결정 (read-only no-audit, OPEN #6).
+	// 알고리즘: bands linear scan, 경계 inclusive (min <= score <= max).
+	// 모든 band 밖 → ErrRubricInvalidInput (fail-closed, REQ-RUBRIC-004-U1)
+	// recorder 호출 0 — audit_logs 0건 (UBI-002 second clause carve-out)
+	ApplyRubric(ctx context.Context, rubricID uuid.UUID, scoreValue float64) (string, *RubricBand, error)
+	// InsertAuditLog 현재 트랜잭션 내에 감사 이벤트를 삽입 (Recorder가 호출)
+	InsertAuditLog(ctx context.Context, e *audit.Event) error
+	// Commit 현재 트랜잭션을 커밋
+	Commit(ctx context.Context) error
+	// Rollback 현재 트랜잭션을 롤백 (defer 안전, Commit 후 no-op)
+	Rollback(ctx context.Context) error
+}
