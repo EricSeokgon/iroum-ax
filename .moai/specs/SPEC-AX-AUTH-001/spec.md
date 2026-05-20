@@ -1,9 +1,9 @@
 ---
 id: SPEC-AX-AUTH-001
-version: 0.1.1
-status: draft
+version: 0.1.2
+status: completed
 created: 2026-05-14
-updated: 2026-05-14
+updated: 2026-05-21
 author: ircp
 priority: high
 issue_number: 0
