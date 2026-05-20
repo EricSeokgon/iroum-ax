@@ -161,10 +161,10 @@ func resolveRubricUserID(userID string) string {
 // userID: created_by/updated_by + audit_logs.user_id에 일관 영속 (UBI-003, D1 iter2 lesson).
 // version은 기본 1로 시작 (clone-new-version sub-resource는 Phase C 핸들러에서 별도 호출).
 //
-// @MX:ANCHOR: [AUTO] 등급 rubric 생성 단일 진입점 — 핸들러/통합 테스트/recorder 3곳 이상 호출
-// @MX:REASON: InsertRubric → recorder.RecordRubricCreated(동일 t.tx) 원자성 계약 —
+// @MX:NOTE: [AUTO] 등급 rubric 생성 단일 진입점 — InsertRubric → recorder.RecordRubricCreated 동일 t.tx 원자성 계약
 //
-//	REQ-RUBRIC-001-E1, AC-RUBRIC-UBI-002 동일-TX 단언 대상
+//	(iter2 demotion: fan_in=2 — handleCreateRubric + handleCloneNewVersion. ANCHOR fan_in≥3 기준 미달.
+//	 ANCHOR는 UpdateRubric/ArchiveRubric/ApplyRubric 3개로 mx.yaml anchor_per_file=3 한도 준수.)
 func (t *PgRubricTx) InsertRubric(
 	ctx context.Context,
 	name, scope string,
@@ -464,8 +464,10 @@ func (t *PgRubricTx) ArchiveRubric(ctx context.Context, id uuid.UUID, archiveRea
 // weight sum > 1.0 검사는 handler 단계 (OPEN #3, PoC store는 단일 row CHECK만).
 // userID: audit_logs.user_id (UBI-003).
 //
-// @MX:ANCHOR: [AUTO] criterion 추가 단일 진입점 — REQ-RUBRIC-001-E2 AC + RUBRIC_CRITERION_ADDED audit
-// @MX:REASON: archived guard + weight 검증 + entity+audit 동일 TX 원자성
+// @MX:NOTE: [AUTO] criterion 추가 단일 진입점 — archived guard + weight 검증 + RUBRIC_CRITERION_ADDED audit 동일 TX
+//
+//	(iter2 demotion: fan_in=1 — handleAddCriterion만 호출. ANCHOR fan_in≥3 기준 미달.
+//	 mx.yaml anchor_per_file=3 한도 준수 — UpdateRubric/ArchiveRubric/ApplyRubric 유지.)
 func (t *PgRubricTx) AddCriterion(
 	ctx context.Context,
 	rubricID, evaluationItemID uuid.UUID,
@@ -514,8 +516,10 @@ func (t *PgRubricTx) AddCriterion(
 // archived rubric에 추가 시 ErrRubricArchived.
 // userID: audit_logs.user_id (UBI-003).
 //
-// @MX:ANCHOR: [AUTO] band 추가 단일 진입점 — REQ-RUBRIC-001-E3 AC + OPEN #4 dual defense
-// @MX:REASON: archived guard + min<max validation + entity+audit 동일 TX 원자성
+// @MX:NOTE: [AUTO] band 추가 단일 진입점 — archived guard + min<max validation + OPEN #4 dual defense
+//
+//	(iter2 demotion: fan_in=1 — handleAddBand만 호출. ANCHOR fan_in≥3 기준 미달.
+//	 mx.yaml anchor_per_file=3 한도 준수 — UpdateRubric/ArchiveRubric/ApplyRubric 유지.)
 func (t *PgRubricTx) AddBand(
 	ctx context.Context,
 	rubricID uuid.UUID,

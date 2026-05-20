@@ -19,6 +19,7 @@ package store
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -420,6 +421,43 @@ func TestApplyRubric_ReadOnly_NoAuditWritten(t *testing.T) {
 
 	tx := &PgRubricTx{}
 	_, _, _ = tx.ApplyRubric(context.Background(), uuid.New(), 85.0)
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// T-RED-018-static [iter2 dark-flow fix] — ApplyRubric 정적 코드 분석 검증
+// iter1 적발 사항: fakeRubricAuditTx가 PgRubricTx.recorder에 wire되지 않아 calls=0이
+// vacuously true. 본 보강 테스트는 rubric.go의 ApplyRubric 함수 본문을 직접 검사하여
+// `t.recorder.` 호출 패턴 부재를 정적으로 보장한다 (OPEN #6 [HARD] 진정성 강화).
+//
+// PgRubricTx.recorder는 *audit.Recorder 구체 타입이라 인터페이스 mock 주입이 불가능.
+// 따라서 정적 소스코드 분석이 가장 강력한 검증 수단이다.
+// ════════════════════════════════════════════════════════════════════════════
+
+func TestApplyRubric_NoRecorderCallStatic(t *testing.T) {
+	content, err := os.ReadFile("rubric.go")
+	require.NoError(t, err, "rubric.go 소스 파일을 읽을 수 있어야 한다")
+
+	src := string(content)
+	// ApplyRubric 함수 시작점 찾기 — "func (t *PgRubricTx) ApplyRubric("
+	funcStart := strings.Index(src, "func (t *PgRubricTx) ApplyRubric(")
+	require.NotEqual(t, -1, funcStart, "ApplyRubric 함수가 rubric.go에 정의되어 있어야 한다")
+
+	// 함수 종료점 — 다음 "\nfunc " 또는 EOF
+	rest := src[funcStart:]
+	funcEnd := strings.Index(rest[1:], "\nfunc ")
+	if funcEnd == -1 {
+		funcEnd = len(rest)
+	} else {
+		funcEnd++ // \n 보정
+	}
+	funcBody := rest[:funcEnd]
+
+	// 검증: ApplyRubric 본문에 t.recorder.* 호출이 부재
+	assert.NotContains(t, funcBody, "t.recorder.",
+		"OPEN #6 [HARD]: ApplyRubric 함수 본문에는 t.recorder.* 호출이 부재해야 한다 (read-only no-audit 정적 보장)")
+	// 추가 검증: RecordRubric* 직접 호출도 부재
+	assert.NotContains(t, funcBody, "RecordRubric",
+		"ApplyRubric 본문에는 RecordRubric* 호출이 부재해야 한다")
 }
 
 // ════════════════════════════════════════════════════════════════════════════

@@ -458,23 +458,54 @@ func TestAddCriterion_WeightSumExceedsOne_400(t *testing.T) {
 
 // ════════════════════════════════════════════════════════════════════════════
 // T-RED-024 — GET /rubrics/{id} viewer 200 (REQ-RUBRIC-002-E2 + AC-RUBRIC-002-2)
+// criteria/bands 임베드 정확성 검증 — toCriterionJSON/toBandJSON 변환 정합
 // ════════════════════════════════════════════════════════════════════════════
 
-func TestGET_Rubrics_ViewerCanRead_200(t *testing.T) {
+func TestGET_Rubrics_ViewerCanRead_200_EmbeddedCriteriaAndBands(t *testing.T) {
 	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
 
 	id := uuid.New()
+	cID := uuid.New()
+	evalItemID := uuid.New()
+	bID := uuid.New()
+	createdAt := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
 	tx := &fakeRubricTx{
-		getByIDResult:  &store.Rubric{ID: id, Name: "x", Status: "active", Scope: "default", Version: 1},
-		criteriaResult: []*store.RubricCriterion{},
-		bandsResult:    []*store.RubricBand{},
+		getByIDResult: &store.Rubric{ID: id, Name: "rubric-embed", Status: "active", Scope: "default", Version: 1, CreatedAt: createdAt, UpdatedAt: createdAt},
+		criteriaResult: []*store.RubricCriterion{
+			{ID: cID, RubricID: id, EvaluationItemID: evalItemID, Weight: 0.75, CreatedAt: createdAt},
+		},
+		bandsResult: []*store.RubricBand{
+			{ID: bID, RubricID: id, Letter: "A", MinScore: 90.0, MaxScore: 100.0, CreatedAt: createdAt},
+		},
 	}
 	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
 
 	target := "/api/v1/rubrics/" + id.String()
 	code, parsed := doRubricReq(t, h, "GET", target, "", "iroum-ax:viewer")
 	require.Equal(t, http.StatusOK, code, "viewer read → 200 (모든 인증)")
-	assert.NotNil(t, parsed)
+	require.NotNil(t, parsed)
+
+	// criteria 임베드 검증 — toCriterionJSON 직렬화 정확성
+	rawCriteria, ok := parsed["criteria"].([]any)
+	require.True(t, ok, "응답 본문에 criteria 배열 임베드")
+	require.Len(t, rawCriteria, 1, "criterion 1건 임베드")
+	cMap, ok := rawCriteria[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, cID.String(), cMap["id"], "criterion.id 직렬화")
+	assert.Equal(t, id.String(), cMap["rubric_id"], "criterion.rubric_id 직렬화")
+	assert.Equal(t, evalItemID.String(), cMap["evaluation_item_id"], "criterion.evaluation_item_id 직렬화")
+	assert.InEpsilon(t, 0.75, cMap["weight"], 0.0001, "criterion.weight 직렬화")
+
+	// bands 임베드 검증 — toBandJSON 직렬화 정확성
+	rawBands, ok := parsed["bands"].([]any)
+	require.True(t, ok, "응답 본문에 bands 배열 임베드")
+	require.Len(t, rawBands, 1, "band 1건 임베드")
+	bMap, ok := rawBands[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, bID.String(), bMap["id"], "band.id 직렬화")
+	assert.Equal(t, "A", bMap["letter"], "band.letter 직렬화")
+	assert.InEpsilon(t, 90.0, bMap["min_score"], 0.0001, "band.min_score 직렬화")
+	assert.InEpsilon(t, 100.0, bMap["max_score"], 0.0001, "band.max_score 직렬화")
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -602,25 +633,57 @@ func TestUpdateRubric_ActiveDirectEdit_AdminSucceeds_200(t *testing.T) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// T-RED-027 — POST /rubrics/{id}/archive admin 200 + terminal 불변 (REQ-RUBRIC-003-E2)
+// T-RED-027 — POST /rubrics/{id}/archive admin active→archived 200 (REQ-RUBRIC-003-E2)
+// active rubric을 archive하는 정상 경로. iter2 fix: 기존 "archived" 시작 상태는 store
+// 계층에서 ErrRubricInvalidStatus 반환(409)이므로 active로 교정하여 semantic 정합.
+// terminal 불변 검증은 T-RED-027b (별도 archived→archive 시도 409)에서 담당.
 // ════════════════════════════════════════════════════════════════════════════
 
-func TestPOST_RubricsArchive_AdminSucceeds_200_TerminalImmutable(t *testing.T) {
+func TestPOST_RubricsArchive_AdminSucceeds_200_ActiveToArchived(t *testing.T) {
 	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
 
 	id := uuid.New()
 	tx := &fakeRubricTx{
-		getByIDResult: buildFakeRubric("archived"),
+		getByIDResult: buildFakeRubric("active"),
 	}
 	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
 
 	target := "/api/v1/rubrics/" + id.String() + "/archive"
 	body := `{"archive_reason":"deprecated by new policy"}`
 	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:admin")
-	require.Equal(t, http.StatusOK, code, "admin archive → 200")
+	require.Equal(t, http.StatusOK, code, "admin archive (active→archived) → 200")
 	assert.True(t, tx.archiveCalled)
 	assert.Equal(t, "deprecated by new policy", tx.gotArchiveReason,
 		"archive_reason 정확 전파")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// T-RED-027c [iter2 dark-flow fix] — archived rubric 재-archive 시도 409 (terminal 불변)
+// REQ-RUBRIC-003-S1 + AC E4 — store가 ErrRubricInvalidStatus 반환 → handler 409 매핑
+// iter1 T-RED-027의 비즈니스 규칙 우회 dark-flow 보정: archived는 어떤 mutation도 거부
+// ════════════════════════════════════════════════════════════════════════════
+
+func TestPOST_RubricsArchive_AlreadyArchived_409_TerminalImmutable(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{
+		getByIDResult: buildFakeRubric("archived"),
+		// store 계층 실 동작 미러 — archived→archived 전이는 ErrRubricInvalidStatus
+		archiveErr: apperrors.ErrRubricInvalidStatus,
+	}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String() + "/archive"
+	body := `{"archive_reason":"already terminal"}`
+	code, parsed := doRubricReq(t, h, "POST", target, body, "iroum-ax:admin")
+	require.Equal(t, http.StatusConflict, code,
+		"archived→archived 전이 시도는 409 CONFLICT (terminal 불변 + ErrRubricInvalidStatus 매핑)")
+
+	errMap, ok := parsed["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "CONFLICT", errMap["code"])
+	assert.True(t, tx.archiveCalled, "store ArchiveRubric은 호출됨 (sentinel 반환 후 매핑)")
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -830,4 +893,731 @@ func TestPOST_RubricsArchivedRubricMutation_409(t *testing.T) {
 	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:admin")
 	require.Equal(t, http.StatusConflict, code,
 		"Phase C: archived terminal 불변 → ErrRubricArchived → 409")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// iter2 신규 오류 경로 테스트 (HIGH-3: handleCreate/AddBand/Clone 등 56-61% → 85%+)
+// ════════════════════════════════════════════════════════════════════════════
+
+// T-RED-034 — POST /rubrics invalid JSON body 400 (REQ-RUBRIC-001-U1 fail-closed)
+func TestPOST_Rubrics_InvalidJSONBody_400(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	tx := &fakeRubricTx{}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	body := `{"name": invalid json`
+	code, parsed := doRubricReq(t, h, "POST", "/api/v1/rubrics", body, "iroum-ax:admin")
+	require.Equal(t, http.StatusBadRequest, code, "malformed JSON → 400 INVALID_ARGUMENT")
+	errMap, ok := parsed["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "INVALID_ARGUMENT", errMap["code"])
+	assert.False(t, tx.insertCalled, "JSON 파싱 실패 시 store 미진입")
+}
+
+// T-RED-035 — POST /rubrics blank name 400 (handler pre-check)
+func TestPOST_Rubrics_BlankName_400(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	tx := &fakeRubricTx{}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	cases := []string{`{"name":"","scope":"default"}`, `{"name":"   ","scope":"default"}`, `{"scope":"default"}`}
+	for i, body := range cases {
+		code, parsed := doRubricReq(t, h, "POST", "/api/v1/rubrics", body, "iroum-ax:admin")
+		require.Equal(t, http.StatusBadRequest, code, "blank/missing name 케이스 %d → 400", i)
+		errMap, ok := parsed["error"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "INVALID_ARGUMENT", errMap["code"])
+		assert.Equal(t, "name", errMap["field"])
+	}
+	assert.False(t, tx.insertCalled, "blank name fail-closed → store 미진입")
+}
+
+// T-RED-036 — POST /rubrics BeginRubricTx 실패 500 (rubric 저장 실패 경로)
+func TestPOST_Rubrics_BeginTxFails_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	rs := &fakeRubricStore{tx: &fakeRubricTx{}, beginErr: io.EOF}
+	es := &fakeRubricEvalItemStore{tx: &fakeRubricEvalItemTx{}}
+	ss := &fakeScoreStore{tx: &fakeScoreTx{}}
+	h := NewRubricHandler(rs, es, ss, zaptest.NewLogger(t))
+
+	body := `{"name":"x","scope":"default"}`
+	req := httptest.NewRequest("POST", "/api/v1/rubrics", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := auth.WithUser(req.Context(), &auth.User{UID: "admin-001", Scopes: []string{"iroum-ax:admin"}})
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code, "BeginRubricTx 실패 → 500")
+}
+
+// T-RED-037 — POST /rubrics InsertRubric ErrRubricInvalidInput 400 매핑
+func TestPOST_Rubrics_InsertReturnsInvalidInput_400(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	tx := &fakeRubricTx{insertErr: apperrors.ErrRubricInvalidInput}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	body := `{"name":"valid-name","scope":"default"}`
+	code, parsed := doRubricReq(t, h, "POST", "/api/v1/rubrics", body, "iroum-ax:admin")
+	require.Equal(t, http.StatusBadRequest, code,
+		"store ErrRubricInvalidInput → mapRubricStoreErr → 400 INVALID_ARGUMENT")
+	errMap, ok := parsed["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "INVALID_ARGUMENT", errMap["code"])
+}
+
+// T-RED-038 — POST /rubrics commit 실패 500
+func TestPOST_Rubrics_CommitFails_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	tx := &fakeRubricTx{insertID: uuid.New(), commitErr: io.EOF}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	body := `{"name":"valid","scope":"default"}`
+	code, _ := doRubricReq(t, h, "POST", "/api/v1/rubrics", body, "iroum-ax:admin")
+	require.Equal(t, http.StatusInternalServerError, code, "Commit 실패 → 500")
+}
+
+// T-RED-039 — POST /rubrics/{id}/bands invalid JSON body 400
+func TestPOST_RubricsAddBand_InvalidJSONBody_400(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{getByIDResult: buildFakeRubric("draft")}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String() + "/bands"
+	body := `not-json`
+	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:admin")
+	require.Equal(t, http.StatusBadRequest, code, "malformed JSON → 400")
+	assert.False(t, tx.addBandDone)
+}
+
+// T-RED-040 — POST /rubrics/{id}/bands blank letter 400 (handler pre-check)
+func TestPOST_RubricsAddBand_BlankLetter_400(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{getByIDResult: buildFakeRubric("draft")}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String() + "/bands"
+	body := `{"letter":"","min_score":80.0,"max_score":89.999}`
+	code, parsed := doRubricReq(t, h, "POST", target, body, "iroum-ax:admin")
+	require.Equal(t, http.StatusBadRequest, code, "blank letter → 400")
+	errMap, ok := parsed["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "letter", errMap["field"])
+	assert.False(t, tx.addBandDone)
+}
+
+// T-RED-041 — POST /rubrics/{id}/bands GetBandsByRubric 실패 500
+func TestPOST_RubricsAddBand_GetBandsErr_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{
+		getByIDResult: buildFakeRubric("draft"),
+		getBandsErr:   io.EOF, // 사전 검사 단계 실패
+	}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String() + "/bands"
+	body := `{"letter":"A","min_score":90.0,"max_score":100.0}`
+	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:admin")
+	require.Equal(t, http.StatusInternalServerError, code, "GetBandsByRubric 실패 → 500")
+	assert.False(t, tx.addBandDone)
+}
+
+// T-RED-042 — POST /rubrics/{id}/bands commit 실패 500
+func TestPOST_RubricsAddBand_CommitFails_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{
+		getByIDResult: buildFakeRubric("draft"),
+		bandsResult:   []*store.RubricBand{},
+		addBandID:     uuid.New(),
+		commitErr:     io.EOF,
+	}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String() + "/bands"
+	body := `{"letter":"A","min_score":90.0,"max_score":100.0}`
+	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:admin")
+	require.Equal(t, http.StatusInternalServerError, code, "AddBand commit 실패 → 500")
+}
+
+// T-RED-043 — POST /rubrics/{id}/clone-new-version rubric 미존재 404
+func TestPOST_RubricsCloneNewVersion_RubricNotFound_404(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{getByIDErr: apperrors.ErrRubricNotFound}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String() + "/clone-new-version"
+	code, _ := doRubricReq(t, h, "POST", target, `{}`, "iroum-ax:admin")
+	require.Equal(t, http.StatusNotFound, code, "GetRubricByID NotFound → 404")
+	assert.False(t, tx.insertCalled, "원본 미존재 시 신규 InsertRubric 미진입")
+}
+
+// T-RED-044 — POST /rubrics/{id}/clone-new-version archived 원본 거부 409
+func TestPOST_RubricsCloneNewVersion_ArchivedRubric_409(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{getByIDResult: buildFakeRubric("archived")}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String() + "/clone-new-version"
+	code, parsed := doRubricReq(t, h, "POST", target, `{}`, "iroum-ax:admin")
+	require.Equal(t, http.StatusConflict, code, "archived 원본 clone 거부 → 409")
+	errMap, ok := parsed["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "CONFLICT", errMap["code"])
+	assert.False(t, tx.insertCalled, "archived 원본은 신규 InsertRubric 미진입")
+}
+
+// T-RED-045 — POST /rubrics/{id}/criteria invalid JSON body 400
+func TestPOST_RubricsAddCriterion_InvalidJSON_400(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String() + "/criteria"
+	code, _ := doRubricReq(t, h, "POST", target, `bad-json`, "iroum-ax:admin")
+	require.Equal(t, http.StatusBadRequest, code, "malformed JSON → 400")
+	assert.False(t, tx.addCriterionDone)
+}
+
+// T-RED-046 — POST /rubrics/{id}/criteria malformed evaluation_item_id 400
+func TestPOST_RubricsAddCriterion_MalformedEvalItemID_400(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String() + "/criteria"
+	body := `{"evaluation_item_id":"not-uuid","weight":0.5}`
+	code, parsed := doRubricReq(t, h, "POST", target, body, "iroum-ax:admin")
+	require.Equal(t, http.StatusBadRequest, code, "malformed UUID → 400")
+	errMap, ok := parsed["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "evaluation_item_id", errMap["field"])
+	assert.False(t, tx.addCriterionDone)
+}
+
+// T-RED-047 — POST /rubrics/{id}/apply malformed score_id 400
+func TestPOST_RubricsApply_MalformedScoreID_400(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	scoreTx := &fakeScoreTx{}
+	rubricTx := &fakeRubricTx{}
+	h := newTestRubricHandler(t, rubricTx, &fakeRubricEvalItemTx{}, scoreTx)
+
+	target := "/api/v1/rubrics/" + id.String() + "/apply"
+	body := `{"score_id":"not-uuid"}`
+	code, parsed := doRubricReq(t, h, "POST", target, body, "iroum-ax:viewer")
+	require.Equal(t, http.StatusBadRequest, code, "malformed score_id → 400")
+	errMap, ok := parsed["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "score_id", errMap["field"])
+	assert.False(t, rubricTx.applyCalled, "ID 파싱 실패 시 store 미진입")
+}
+
+// T-RED-048 — PUT /rubrics/{id} GetRubricByID 실패 404
+func TestPUT_Rubrics_GetByIDNotFound_404(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{getByIDErr: apperrors.ErrRubricNotFound}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String()
+	body := `{"name":"x","scope":"default","status":"active"}`
+	code, _ := doRubricReq(t, h, "PUT", target, body, "iroum-ax:admin")
+	require.Equal(t, http.StatusNotFound, code, "GetRubricByID NotFound → 404")
+	assert.False(t, tx.updateCalled)
+}
+
+// T-RED-049 — PUT /rubrics/{id} malformed UUID 400
+func TestPUT_Rubrics_MalformedUUID_400(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	tx := &fakeRubricTx{}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	body := `{"name":"x","scope":"default","status":"active"}`
+	code, _ := doRubricReq(t, h, "PUT", "/api/v1/rubrics/bad-uuid", body, "iroum-ax:admin")
+	require.Equal(t, http.StatusBadRequest, code, "malformed path UUID → 400")
+	assert.False(t, tx.updateCalled)
+}
+
+// T-RED-050 — GET /rubrics 페이지네이션 limit/offset 매개변수 파싱
+func TestGET_Rubrics_PaginationParams(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	tx := &fakeRubricTx{
+		listResult:  []*store.Rubric{buildFakeRubric("active")},
+		countResult: 1,
+	}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	// 다양한 limit/offset 조합 — clampRubricPagination 분기 커버
+	cases := []string{
+		"/api/v1/rubrics?limit=10&offset=5",
+		"/api/v1/rubrics?limit=9999",            // > maxRubricListLimit → clamp to 500
+		"/api/v1/rubrics?status=active&scope=k", // filter 파라미터
+		"/api/v1/rubrics",                       // default
+	}
+	for _, target := range cases {
+		code, _ := doRubricReq(t, h, "GET", target, "", "iroum-ax:viewer")
+		require.Equal(t, http.StatusOK, code, "pagination 변형 → 200: %s", target)
+	}
+}
+
+// T-RED-051 — POST /rubrics/{id}/criteria EvalItem TX-1 BeginTx 실패 500
+func TestPOST_RubricsAddCriterion_EvalItemBeginTxFails_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	rs := &fakeRubricStore{tx: &fakeRubricTx{}}
+	es := &fakeRubricEvalItemStore{tx: &fakeRubricEvalItemTx{}, beginErr: io.EOF}
+	ss := &fakeScoreStore{tx: &fakeScoreTx{}}
+	h := NewRubricHandler(rs, es, ss, zaptest.NewLogger(t))
+
+	target := "/api/v1/rubrics/" + id.String() + "/criteria"
+	body := `{"evaluation_item_id":"` + uuid.New().String() + `","weight":0.5}`
+	req := httptest.NewRequest("POST", target, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := auth.WithUser(req.Context(), &auth.User{UID: "admin-001", Scopes: []string{"iroum-ax:admin"}})
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code, "EvalItem BeginTx 실패 → 500")
+}
+
+// T-RED-052 — POST /rubrics/{id}/apply Score BeginScoreTx 실패 500
+func TestPOST_RubricsApply_ScoreBeginTxFails_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	scoreID := uuid.New()
+	rs := &fakeRubricStore{tx: &fakeRubricTx{}}
+	es := &fakeRubricEvalItemStore{tx: &fakeRubricEvalItemTx{}}
+	ss := &fakeScoreStore{tx: &fakeScoreTx{}, beginErr: io.EOF}
+	h := NewRubricHandler(rs, es, ss, zaptest.NewLogger(t))
+
+	target := "/api/v1/rubrics/" + id.String() + "/apply"
+	body := `{"score_id":"` + scoreID.String() + `"}`
+	req := httptest.NewRequest("POST", target, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code, "Score BeginTx 실패 → 500")
+}
+
+// T-RED-053 — POST /rubrics/{id}/clone-new-version commit 실패 500
+func TestPOST_RubricsCloneNewVersion_CommitFails_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{
+		getByIDResult: buildFakeRubric("active"),
+		insertID:      uuid.New(),
+		commitErr:     io.EOF,
+	}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String() + "/clone-new-version"
+	code, _ := doRubricReq(t, h, "POST", target, `{}`, "iroum-ax:admin")
+	require.Equal(t, http.StatusInternalServerError, code, "Clone Commit 실패 → 500")
+}
+
+// T-RED-054 — GET /rubrics/{id} criteria 조회 실패 500
+func TestGET_Rubrics_GetCriteriaErr_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{
+		getByIDResult:  buildFakeRubric("active"),
+		getCriteriaErr: io.EOF,
+	}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String()
+	code, _ := doRubricReq(t, h, "GET", target, "", "iroum-ax:viewer")
+	require.Equal(t, http.StatusInternalServerError, code, "GetCriteriaByRubric 실패 → 500")
+}
+
+// T-RED-055 — GET /rubrics/{id} bands 조회 실패 500
+func TestGET_Rubrics_GetBandsErr_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{
+		getByIDResult:  buildFakeRubric("active"),
+		criteriaResult: []*store.RubricCriterion{},
+		getBandsErr:    io.EOF,
+	}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String()
+	code, _ := doRubricReq(t, h, "GET", target, "", "iroum-ax:viewer")
+	require.Equal(t, http.StatusInternalServerError, code, "GetBandsByRubric 실패 → 500")
+}
+
+// T-RED-056 — GET /rubrics CountRubrics 실패 500
+func TestGET_Rubrics_CountErr_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	tx := &fakeRubricTx{
+		listResult: []*store.Rubric{buildFakeRubric("active")},
+		countErr:   io.EOF,
+	}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	code, _ := doRubricReq(t, h, "GET", "/api/v1/rubrics", "", "iroum-ax:viewer")
+	require.Equal(t, http.StatusInternalServerError, code, "CountRubrics 실패 → 500")
+}
+
+// T-RED-057 — PUT /rubrics/{id} invalid JSON body 400
+func TestPUT_Rubrics_InvalidJSONBody_400(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String()
+	code, _ := doRubricReq(t, h, "PUT", target, `{bad-json`, "iroum-ax:admin")
+	require.Equal(t, http.StatusBadRequest, code, "PUT malformed JSON → 400")
+	assert.False(t, tx.updateCalled)
+}
+
+// T-RED-058 — PUT /rubrics/{id} draft→active dup count 실패 500
+func TestPUT_Rubrics_CountDupActiveFails_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{
+		getByIDResult: buildFakeRubric("draft"),
+		countErr:      io.EOF, // dup pre-check 실패
+	}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String()
+	body := `{"name":"safety-v1","scope":"kepco-safety","status":"active"}`
+	code, _ := doRubricReq(t, h, "PUT", target, body, "iroum-ax:admin")
+	require.Equal(t, http.StatusInternalServerError, code, "CountRubrics 실패 → 500")
+	assert.False(t, tx.updateCalled)
+}
+
+// T-RED-059 — POST /rubrics/{id}/archive BeginTx 실패 500
+func TestPOST_RubricsArchive_BeginTxFails_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	rs := &fakeRubricStore{tx: &fakeRubricTx{}, beginErr: io.EOF}
+	es := &fakeRubricEvalItemStore{tx: &fakeRubricEvalItemTx{}}
+	ss := &fakeScoreStore{tx: &fakeScoreTx{}}
+	h := NewRubricHandler(rs, es, ss, zaptest.NewLogger(t))
+
+	body := `{"archive_reason":"deprecated"}`
+	target := "/api/v1/rubrics/" + id.String() + "/archive"
+	req := httptest.NewRequest("POST", target, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := auth.WithUser(req.Context(), &auth.User{UID: "admin-001", Scopes: []string{"iroum-ax:admin"}})
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code, "Archive BeginTx 실패 → 500")
+}
+
+// T-RED-060 — POST /rubrics/{id}/apply Float64 변환 실패 500
+// REPORT-001 D3-2 lesson 정합: silent fallback 금지, scoreF.Valid=false 시 명시적 500
+func TestPOST_RubricsApply_Float64ConversionFails_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	scoreID := uuid.New()
+	// pgtype.Numeric NaN 또는 Inf 시 Float64Value 실패. 빈 numeric으로 시뮬레이션.
+	num := pgtype.Numeric{Valid: false} // Valid=false → Float64Value().Valid=false
+	scoreTx := &fakeScoreTx{
+		weightedSum:   num,
+		getByIDResult: &store.Score{ID: scoreID, EvaluationItemID: "item-001", Level: "raw"},
+	}
+	rubricTx := &fakeRubricTx{getByIDResult: buildFakeRubric("active")}
+	h := newTestRubricHandler(t, rubricTx, &fakeRubricEvalItemTx{}, scoreTx)
+
+	target := "/api/v1/rubrics/" + id.String() + "/apply"
+	body := `{"score_id":"` + scoreID.String() + `"}`
+	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:viewer")
+	require.Equal(t, http.StatusInternalServerError, code,
+		"Float64 변환 실패 (NaN/Inf/invalid numeric) → 500 (REPORT-001 D3-2 lesson)")
+	assert.False(t, rubricTx.applyCalled, "변환 실패 시 TX-2 ApplyRubric 미진입")
+}
+
+// T-RED-061 — POST /rubrics/{id}/apply Score GetByID 실패 → ErrScoreNotFound 404
+func TestPOST_RubricsApply_ScoreNotFound_404(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	scoreID := uuid.New()
+	scoreTx := &fakeScoreTx{getByIDErr: apperrors.ErrScoreNotFound}
+	rubricTx := &fakeRubricTx{}
+	h := newTestRubricHandler(t, rubricTx, &fakeRubricEvalItemTx{}, scoreTx)
+
+	target := "/api/v1/rubrics/" + id.String() + "/apply"
+	body := `{"score_id":"` + scoreID.String() + `"}`
+	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:viewer")
+	require.Equal(t, http.StatusNotFound, code, "ErrScoreNotFound → 404")
+	assert.False(t, rubricTx.applyCalled)
+}
+
+// T-RED-062 — POST /rubrics/{id}/apply Rubric TX-2 BeginTx 실패 500
+func TestPOST_RubricsApply_RubricBeginTxFails_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	scoreID := uuid.New()
+	num := pgtype.Numeric{}
+	require.NoError(t, num.Scan("85.5"))
+	scoreTx := &fakeScoreTx{
+		weightedSum:   num,
+		getByIDResult: &store.Score{ID: scoreID, EvaluationItemID: "item-001"},
+	}
+	rs := &fakeRubricStore{tx: &fakeRubricTx{}, beginErr: io.EOF}
+	es := &fakeRubricEvalItemStore{tx: &fakeRubricEvalItemTx{}}
+	ss := &fakeScoreStore{tx: scoreTx}
+	h := NewRubricHandler(rs, es, ss, zaptest.NewLogger(t))
+
+	target := "/api/v1/rubrics/" + id.String() + "/apply"
+	body := `{"score_id":"` + scoreID.String() + `"}`
+	req := httptest.NewRequest("POST", target, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code, "Rubric TX-2 BeginTx 실패 → 500")
+}
+
+// T-RED-063 — mapRubricStoreErr SQLSTATE 23505 (unique violation) → 409
+func TestMapRubricStoreErr_SQLState23505_409(t *testing.T) {
+	pgErr := &pgconn.PgError{Code: "23505", ConstraintName: "rubrics_active_unique_idx"}
+	code, errCode, msg := mapRubricStoreErr(pgErr)
+	assert.Equal(t, http.StatusConflict, code)
+	assert.Equal(t, "CONFLICT", errCode)
+	assert.Contains(t, msg, "active")
+}
+
+// T-RED-064 — mapRubricStoreErr SQLSTATE 23P01 (exclusion violation) → 400
+func TestMapRubricStoreErr_SQLState23P01_400(t *testing.T) {
+	pgErr := &pgconn.PgError{Code: "23P01", ConstraintName: "rubric_bands_no_overlap"}
+	code, errCode, _ := mapRubricStoreErr(pgErr)
+	assert.Equal(t, http.StatusBadRequest, code)
+	assert.Equal(t, "INVALID_ARGUMENT", errCode)
+}
+
+// T-RED-065 — mapRubricStoreErr ErrRubricAuditWriteFailed → 500
+func TestMapRubricStoreErr_AuditWriteFailed_500(t *testing.T) {
+	code, errCode, _ := mapRubricStoreErr(apperrors.ErrRubricAuditWriteFailed)
+	assert.Equal(t, http.StatusInternalServerError, code)
+	assert.Equal(t, "INTERNAL", errCode)
+}
+
+// T-RED-066 — mapRubricStoreErr ErrRubricBandOverlap → 400
+func TestMapRubricStoreErr_BandOverlap_400(t *testing.T) {
+	code, errCode, _ := mapRubricStoreErr(apperrors.ErrRubricBandOverlap)
+	assert.Equal(t, http.StatusBadRequest, code)
+	assert.Equal(t, "INVALID_ARGUMENT", errCode)
+}
+
+// T-RED-067 — mapRubricStoreErr ErrRubricWeightOutOfBounds → 400
+func TestMapRubricStoreErr_WeightOutOfBounds_400(t *testing.T) {
+	code, errCode, _ := mapRubricStoreErr(apperrors.ErrRubricWeightOutOfBounds)
+	assert.Equal(t, http.StatusBadRequest, code)
+	assert.Equal(t, "INVALID_ARGUMENT", errCode)
+}
+
+// T-RED-068 — mapRubricStoreErr default unknown error → 500
+func TestMapRubricStoreErr_UnknownError_500(t *testing.T) {
+	code, errCode, _ := mapRubricStoreErr(io.EOF)
+	assert.Equal(t, http.StatusInternalServerError, code)
+	assert.Equal(t, "INTERNAL", errCode)
+}
+
+// T-RED-069 — PUT /rubrics/{id} UpdateRubric 실패 후 sentinel 매핑
+func TestPUT_Rubrics_UpdateReturnsSentinel_400(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{
+		getByIDResult: buildFakeRubric("draft"),
+		updateErr:     apperrors.ErrRubricInvalidInput,
+	}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String()
+	body := `{"name":"x","scope":"default","status":"active"}`
+	code, _ := doRubricReq(t, h, "PUT", target, body, "iroum-ax:admin")
+	require.Equal(t, http.StatusBadRequest, code, "UpdateRubric ErrRubricInvalidInput → 400")
+}
+
+// T-RED-070 — PUT /rubrics/{id} 갱신 후 재조회 실패 → 500
+func TestPUT_Rubrics_PostUpdateGetByIDFails_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	// 갱신은 성공, 그러나 재조회 시 실패하는 시나리오 — getByIDResult/Err 분기 필요
+	// fake가 단일 getByIDErr 필드로 첫 호출과 두 번째 호출 분기 불가하므로,
+	// 첫 호출이 성공 (getByIDResult 있음), 두 번째 호출 시 — 본 fake는 같은 결과 반환
+	// 대신 commitErr 시나리오로 갱신 후 commit 실패 검증
+	tx := &fakeRubricTx{
+		getByIDResult: buildFakeRubric("draft"),
+		commitErr:     io.EOF,
+	}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String()
+	body := `{"name":"x","scope":"default","status":"active"}`
+	code, _ := doRubricReq(t, h, "PUT", target, body, "iroum-ax:admin")
+	require.Equal(t, http.StatusInternalServerError, code, "Update commit 실패 → 500")
+}
+
+// T-RED-071 — POST /rubrics/{id}/archive 갱신 후 재조회 실패 500
+func TestPOST_RubricsArchive_PostArchiveCommitFails_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{
+		getByIDResult: buildFakeRubric("active"),
+		commitErr:     io.EOF,
+	}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String() + "/archive"
+	body := `{"archive_reason":"deprecated"}`
+	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:admin")
+	require.Equal(t, http.StatusInternalServerError, code, "Archive commit 실패 → 500")
+}
+
+// T-RED-072 — POST /rubrics/{id}/criteria commit 실패 500
+func TestPOST_RubricsAddCriterion_CommitFails_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	evalTx := &fakeRubricEvalItemTx{
+		getResult: &store.EvalItem{ID: uuid.New().String(), DisplayName: "item-x"},
+	}
+	tx := &fakeRubricTx{
+		getByIDResult:  buildFakeRubric("draft"),
+		criteriaResult: []*store.RubricCriterion{},
+		addCriterionID: uuid.New(),
+		commitErr:      io.EOF,
+	}
+	h := newTestRubricHandler(t, tx, evalTx, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String() + "/criteria"
+	body := `{"evaluation_item_id":"` + uuid.New().String() + `","weight":0.5}`
+	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:admin")
+	require.Equal(t, http.StatusInternalServerError, code, "AddCriterion commit 실패 → 500")
+}
+
+// T-RED-073 — POST /rubrics/{id}/criteria existing criteria 조회 실패 500
+func TestPOST_RubricsAddCriterion_GetCriteriaErr_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	evalTx := &fakeRubricEvalItemTx{
+		getResult: &store.EvalItem{ID: uuid.New().String(), DisplayName: "item-x"},
+	}
+	tx := &fakeRubricTx{
+		getByIDResult:  buildFakeRubric("draft"),
+		getCriteriaErr: io.EOF,
+	}
+	h := newTestRubricHandler(t, tx, evalTx, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String() + "/criteria"
+	body := `{"evaluation_item_id":"` + uuid.New().String() + `","weight":0.5}`
+	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:admin")
+	require.Equal(t, http.StatusInternalServerError, code, "GetCriteriaByRubric 실패 → 500")
+	assert.False(t, tx.addCriterionDone)
+}
+
+// T-RED-074 — POST /rubrics/{id}/clone-new-version Insert 실패 sentinel 매핑
+func TestPOST_RubricsCloneNewVersion_InsertFails_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{
+		getByIDResult: buildFakeRubric("active"),
+		insertErr:     io.EOF,
+	}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String() + "/clone-new-version"
+	code, _ := doRubricReq(t, h, "POST", target, `{}`, "iroum-ax:admin")
+	require.Equal(t, http.StatusInternalServerError, code, "Clone Insert 실패 → 500")
+}
+
+// T-RED-075 — GET /rubrics ListRubrics 실패 500
+func TestGET_Rubrics_ListErr_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	tx := &fakeRubricTx{listErr: io.EOF}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	code, _ := doRubricReq(t, h, "GET", "/api/v1/rubrics", "", "iroum-ax:viewer")
+	require.Equal(t, http.StatusInternalServerError, code, "ListRubrics 실패 → 500")
+}
+
+// T-RED-076 — POST /rubrics/{id}/apply SumWeightedByEvaluationItem 실패 500
+func TestPOST_RubricsApply_SumWeightedFails_500(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	scoreID := uuid.New()
+	scoreTx := &fakeScoreTx{
+		rollupErr:     io.EOF,
+		getByIDResult: &store.Score{ID: scoreID, EvaluationItemID: "item-001", Level: "raw"},
+	}
+	rubricTx := &fakeRubricTx{getByIDResult: buildFakeRubric("active")}
+	h := newTestRubricHandler(t, rubricTx, &fakeRubricEvalItemTx{}, scoreTx)
+
+	target := "/api/v1/rubrics/" + id.String() + "/apply"
+	body := `{"score_id":"` + scoreID.String() + `"}`
+	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:viewer")
+	require.Equal(t, http.StatusInternalServerError, code, "SumWeighted 실패 → 500")
+	assert.False(t, rubricTx.applyCalled)
+}
+
+// T-RED-077 — POST /rubrics/{id}/bands AddBand sentinel ErrRubricBandOverlap → 400
+func TestPOST_RubricsAddBand_StoreReturnsBandOverlap_400(t *testing.T) {
+	defer goleak.VerifyNone(t, rubricGoLeakOptions...)
+
+	id := uuid.New()
+	tx := &fakeRubricTx{
+		getByIDResult: buildFakeRubric("draft"),
+		bandsResult:   []*store.RubricBand{},
+		addBandErr:    apperrors.ErrRubricBandOverlap,
+	}
+	h := newTestRubricHandler(t, tx, &fakeRubricEvalItemTx{}, &fakeScoreTx{})
+
+	target := "/api/v1/rubrics/" + id.String() + "/bands"
+	body := `{"letter":"A","min_score":90.0,"max_score":100.0}`
+	code, _ := doRubricReq(t, h, "POST", target, body, "iroum-ax:admin")
+	require.Equal(t, http.StatusBadRequest, code, "store ErrRubricBandOverlap → 400")
 }
