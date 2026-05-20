@@ -5,6 +5,19 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)을 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/lang/ko/)을 준수합니다.
 
+## [Unreleased] - 2026-05-20
+
+### Added — SPEC-AX-REVIEW-001 v0.1.1 (평가 제출/승인 워크플로우 store + HTTP API 수직 슬라이스)
+
+- **6개 REST 엔드포인트** (`apps/control-plane/cmd/server/review_handlers.go`): `POST /api/v1/reviews` (검토 요청 생성, 201) · `GET /api/v1/reviews` (목록 조회) · `GET /api/v1/reviews/{id}` (단건 조회) · `POST /api/v1/reviews/{id}/assign-reviewer` (검토자 배정) · `POST /api/v1/reviews/{id}/approve` (승인) · `POST /api/v1/reviews/{id}/reject` (반려). Go1.22 ServeMux 최장일치 라우팅(`score_handlers.go` 선례 미러).
+- **ReviewHandler** (`cmd/server/review_handlers.go`): `ReviewHandler` struct + `NewReviewHandler(reviewStore ScoreReviewRequestStore, scoreStore ScoreStore, logger)` + `Routes() http.Handler`. cross-store 2-TX 패턴(TX-1: scoreStore read-only score 존재 검증, TX-2: reviewStore write 상태 전이), `SELECT FOR UPDATE` 비관적 락(동시 전이 중복 방지), 4-state machine(`SUBMITTED→UNDER_REVIEW→APPROVED/REJECTED` 단방향 비가역), `resolveCreatedBy(r)` → `userID` 파라미터 영속화(`BeginScoreReviewRequestTx` 서명), 표준 에러 본문 `{"error":{"code","message","field"}}`.
+- **server.go 마운트** (`cmd/server/server.go`, ≈7줄 최소 단위): `reviewH` 필드 + `NewReviewHandler(pgStore, pgStore, logger)` + `innerMux.Handle("/api/v1/reviews", ...)` + `innerMux.Handle("/api/v1/reviews/", ...)` 2줄. 기존 `RESTAuthzMiddleware` 와이어링 자동 적용, ABAC 와이어링 0-diff(analyst=submit, admin=assign/approve/reject, 전 role=read).
+- **score_review_requests 테이블** (`.moai/db/schema/migrations/0005_score_review_request_tables.sql`): 11컬럼(`id UUID PK`, `score_id UUID`, `status VARCHAR(32) DEFAULT 'SUBMITTED'`, `assigned_reviewer_id VARCHAR(128)`, `rejection_reason TEXT`, `comment TEXT`, `metadata JSONB`, `created_at/updated_at TIMESTAMPTZ`, `created_by/updated_by VARCHAR(128) DEFAULT 'cli-anonymous'`). CHECK 제약 2종(`status` 열거형 4값, `rejection_reason` REJECTED 시 필수). 인덱스 3개(`score_id`, `status`, `created_at DESC`).
+- **consumer-only 0-diff [HARD]**: `internal/store|audit|auth|errors`·`score_handlers.go`·`evidence_handlers.go`·`report_handlers.go`·기존 마이그레이션 무변경. 신규 DB 마이그레이션 1건(0005)·신규 외부 의존 0건.
+- **TDD GAN iter2 PASS**: iter1 FAIL 73.5 (Must-Pass UBI-003 위반 — D1 `NewRecorder(false)` 반환으로 auth-enabled 시 `userID`가 항상 `'cli-anonymous'`로 고정) → iter2 PASS 92.8 (D1 root cause fix: `NewRecorder(true)` 전환 + `userID` 파라미터 전파). T-111 DB-level CHECK(false) audit fault rollback(EVAL-ITEM-001 동형 패턴). 이중 게이트 PASS: evaluator-active 92.8 / manager-quality TRUST 5 PASS. integration 14/14(testcontainers).
+
+---
+
 ## [Unreleased] - 2026-05-19
 
 ### Added — SPEC-AX-REPORT-001 v0.1.1 (경영평가 결과 리포트/집계 HTTP API 계층)

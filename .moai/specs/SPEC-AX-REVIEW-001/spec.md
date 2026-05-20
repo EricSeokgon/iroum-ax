@@ -1,7 +1,7 @@
 ---
 id: SPEC-AX-REVIEW-001
-version: 0.1.0
-status: draft
+version: 0.1.1
+status: completed
 created: 2026-05-20
 updated: 2026-05-20
 author: ircp
@@ -11,6 +11,7 @@ issue_number: 0
 
 # HISTORY
 
+- 0.1.1 (2026-05-20): TDD GAN iter2 PASS — iter1 FAIL 73.5 Must-Pass UBI-003 위반(D1: `NewRecorder(false)` 반환으로 auth-enabled 시 userID가 항상 `'cli-anonymous'`로 고정되어 `auth.UserFromContext` 결과를 무시, evaluator-active D1 Must-Pass 탈락) → iter2 PASS 92.8 (D1 root cause fix: `NewRecorder(true)` 전환 + `BeginScoreReviewRequestTx` 서명에 `userID string` 파라미터 추가로 `resolveCreatedBy(r)` 결과를 store까지 정확 전파, UBI-003 Must-Pass 해소). T-111 DB-level CHECK(false) audit fault rollback 패턴은 EVAL-ITEM-001 동형 선례와 충돌하는 evaluator-active 오탐으로 판정되어 롤백 적용 (EVAL-ITEM-001 동형 패턴 검증 완료). 이중 게이트 PASS: evaluator-active 92.8 / manager-quality TRUST 5 PASS. integration 14/14 (testcontainers), consumer-only [HARD] 0-diff 불변, 신규 마이그레이션 0005 1건, §6 6건 RESOLVED 전체 구현 완료.
 - 0.1.0 (2026-05-20): 평가 제출/승인 워크플로우 저장소 + HTTP API 계층(Score Review Request Store + HTTP API Layer) 첫 초안. SPEC-AX-SCORE-001(완료, v0.1.3)이 확립한 `scores` 테이블 위에 **평가 제출/검토/승인 4-상태 생명주기 저장소 + REST HTTP API 계층**을 추가한다(SPEC-AX-SCORE-001 + SPEC-AX-SCORE-API-001 수직 슬라이스 선례를 단일 SPEC으로 결합 — research.md §13). 4 상태: `SUBMITTED`(analyst 제출) → `UNDER_REVIEW`(admin 검토자 할당) → `APPROVED`/`REJECTED`(terminal, 되돌리기 불가, research.md §3.1). 신규 store 도메인(`ScoreReviewRequestStore`/`ScoreReviewRequestTx`) + 신규 마이그레이션 `0005_score_review_request_tables.sql` + 동일-TX `RecordScoreReviewRequest*` 감사(SCORE-001 D2/D4 패턴 미러) + 6 HTTP 엔드포인트(생성/조회/목록/검토자할당/승인/반려). 핸들러-로컬 ABAC narrowing(analyst=제출 / admin=승인·반려·검토자할당 / viewer+모든 인증=조회) — frozen `rbac.go`(`admin`/`analyst`/`viewer` 3역할, `rbac.go:33` 정규식 `^iroum-ax:(admin|analyst|viewer)$`) **0-diff**(SCORE-API-001 `requireScoreWriteRole`/`guardScoreWrite` `score_handlers.go:161-187` 동형 패턴 재사용). `score_review_requests.score_id`는 SCORE-001 `scores.id`(UUID)를 참조하는 **FK-제약-없는 stub**(consumer-only [HARD]) — SCORE-001 코드·스키마·`0004` 마이그레이션 무수정(0 diff). 한국 공공 6제약(데이터 주권/한국어/감사 가능성/망분리/조직 격리/시간 제약) 준수. research.md(Phase 0.5 deep research, 665줄, file:line 근거)가 SSOT. (작성자: ircp)
 
 > Schema note: YAML frontmatter는 SPEC-AX-SCORE-001 / SPEC-AX-SCORE-API-001 / SPEC-AX-REPORT-001과 동일하게 `.claude/skills/moai/workflows/plan.md` Phase 2 (L378)의 8-field canonical 정의(`id, version, status, created, updated, author, priority, issue_number`)를 따른다. `labels`, `created_at` 등 canonical 외 필드는 사용하지 않는다. 본 SPEC의 모든 EARS 요구사항·영향파일·HTTP 계약·DB 스키마는 `.moai/specs/SPEC-AX-REVIEW-001/research.md`(file:line 근거)에 근거하며, 소비 계약 시그니처는 `apps/control-plane/internal/store/store.go`(`ScoreStore`/`ScoreTx` `store.go:253-305`, `EvalItemStore` `store.go:115-119` 패턴 미러 대상), `apps/control-plane/internal/store/pg_store.go`(`BeginScoreTx` `pg_store.go:134-148` Recorder 주입 선례), `apps/control-plane/cmd/server/score_handlers.go`(핸들러+ABAC 선례 `:43-51/:59-70/:111-129/:161-187/:179-190`), `apps/control-plane/internal/auth/rbac.go`(frozen 3-role `:19-26/:33/:68-80`), `apps/control-plane/internal/errors/errors.go`(센티넬 패턴 `:52-78`), `apps/control-plane/cmd/server/server.go`(라우트 마운트 ≈7줄 — `scoreH` 필드 `:55`, 생성 `:210`, 마운트 `:266-267`), `.moai/db/schema/migrations/0004_score_tables.sql`(멱등 패턴)에서 직접 검증되었다(phantom API 0건 — manager-spec orchestrator ground-truth 검증, 2026-05-20).
