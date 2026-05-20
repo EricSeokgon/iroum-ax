@@ -82,6 +82,22 @@ const (
 	ActionScoreReviewRequestApproved Action = "SCORE_REVIEW_REQUEST_APPROVED"
 	// ActionScoreReviewRequestRejected 반려 (UNDER_REVIEW→REJECTED terminal) 시 기록
 	ActionScoreReviewRequestRejected Action = "SCORE_REVIEW_REQUEST_REJECTED"
+
+	// ActionRubricCreated 등급 rubric 생성 시 기록 (SPEC-AX-RUBRIC-001 REQ-RUBRIC-UBI-002)
+	// D2: resource_id = rubrics.id UUID 직접 대입 (AUD-1 surrogate 미사용)
+	ActionRubricCreated Action = "RUBRIC_CREATED"
+	// ActionRubricUpdated 등급 rubric 수정 시 기록 (status 전이 + 메타 변경 단일 audit row, R-RUBRIC-009)
+	ActionRubricUpdated Action = "RUBRIC_UPDATED"
+	// ActionRubricArchived 등급 rubric archive (active→archived terminal) 시 기록
+	// archive_reason은 metadata details JSONB에 포함 (OPEN #7 추적성)
+	ActionRubricArchived Action = "RUBRIC_ARCHIVED"
+	// ActionRubricCriterionAdded rubric_criteria 행 추가 시 기록 (REQ-RUBRIC-001-E2)
+	// resource_id = rubric_criteria.id 직접 대입
+	ActionRubricCriterionAdded Action = "RUBRIC_CRITERION_ADDED"
+	// ActionRubricBandAdded rubric_bands 행 추가 시 기록 (REQ-RUBRIC-001-E3)
+	// resource_id = rubric_bands.id 직접 대입
+	ActionRubricBandAdded Action = "RUBRIC_BAND_ADDED"
+	// 주의: ApplyRubric은 read-only — ActionRubricApplied 상수 신설 0 (OPEN #6 read-only no-audit)
 )
 
 // EvalItemAuditNamespace 평가항목 감사 resource_id surrogate 생성용 고정 UUID namespace.

@@ -172,6 +172,33 @@ func (s *PgWorkflowStore) BeginScoreReviewRequestTx(ctx context.Context) (ScoreR
 	}, nil
 }
 
+// BeginRubricTx 새로운 등급 rubric 트랜잭션을 시작하여 PgRubricTx를 반환 (SPEC-AX-RUBRIC-001)
+// 기존 단일 pgx pool(REQ-RUBRIC-UBI-001 데이터 주권)을 재사용한다.
+// 신규 pool을 생성하지 않으며, postgres.go(死 스텁)는 대상이 아니다.
+// 반환된 RubricTx는 반드시 Commit 또는 Rollback 중 하나로 종료해야 함.
+//
+// @MX:ANCHOR: [AUTO] 등급 rubric 도메인 유일 TX 진입점 — 핸들러/통합 테스트/recorder 3곳 이상에서 호출
+// @MX:REASON: 단일 pool 싱글톤 재사용 계약 — 신규 pgxpool 생성 금지, pg_store.go:157 BeginScoreReviewRequestTx 패턴 정확 미러
+func (s *PgWorkflowStore) BeginRubricTx(ctx context.Context) (RubricTx, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return nil, fmt.Errorf("BeginRubricTx 실패: %w", stderrors.ErrPgxPoolExhausted)
+	}
+	// REQ-RUBRIC-UBI-002: PgRubricTx에 Recorder를 주입하여 mutation 5종
+	// (InsertRubric/UpdateRubric/ArchiveRubric/AddCriterion/AddBand)이 동일 pgx.Tx에
+	// entity+audit를 원자적으로 기록한다. ApplyRubric은 read-only이므로 recorder 미호출 (OPEN #6).
+	//
+	// [HARD] audit.NewRecorder(true) — REVIEW-001 D1 iter2 lesson pre-applied:
+	// authEnabled=true 주입으로 auth-enabled 모드에서 principal.id를 audit_logs.user_id에 정확 전파.
+	// authEnabled=false 사용 시 recorder.resolveUserID가 모든 userID를 'cli-anonymous'로
+	// 영구 덮어쓰기 → UBI-003 Must-Pass Firewall 위반 (REVIEW-001 v0.1.1 iter2 root cause).
+	return &PgRubricTx{
+		tx:       tx,
+		logger:   s.logger,
+		recorder: audit.NewRecorder(true),
+	}, nil
+}
+
 // PgWorkflowTx pgx.Tx 래퍼 — WorkflowTx 인터페이스 구현
 // 단일 PostgreSQL 트랜잭션 내에서 모든 쓰기 연산을 수행
 //

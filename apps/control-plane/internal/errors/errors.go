@@ -103,3 +103,42 @@ var ErrScoreReviewRequestNotUnderReview = errors.New("score review request not i
 // (REQ-REVIEW-004-U1 / Edge E16). 호출자가 errors.Is로 식별하여 Rollback하면
 // score_review_requests/audit_logs 양방향 취소 (양방향 원자성).
 var ErrScoreReviewRequestAuditWriteFailed = errors.New("score review request audit write failed")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SPEC-AX-RUBRIC-001 sentinels (등급 rubric 도메인)
+// SCORE-API-001 errors.go drift lesson [HARD]: spec.md §2.1 + §2.3 Drift-Guard
+// manifest 양쪽에 EXPLICIT 부착 — manifest 분실 방지. 정확히 7개 신규 추가, 기존 무수정.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ErrRubricNotFound 요청한 등급 rubric ID가 존재하지 않음 (SPEC-AX-RUBRIC-001)
+// GetRubricByID는 pgx.ErrNoRows 대신 이 센티널을 래핑하여 반환한다 (GAP-03 동형).
+var ErrRubricNotFound = errors.New("rubric not found")
+
+// ErrRubricInvalidInput rubric 입력 검증 실패 (blank/>64 name, blank letter,
+// min >= max, score out of bands 등 — REQ-RUBRIC-001-U1 / REQ-RUBRIC-004-U1).
+// store 계층이 SQL 미실행 후 반환 (fail-closed).
+var ErrRubricInvalidInput = errors.New("rubric invalid input")
+
+// ErrRubricInvalidStatus 허용되지 않은 rubric 상태 전이 시도 (UBI-004 / REQ-RUBRIC-003-S2)
+// archived terminal 또는 draft→archived 직접 전이 등.
+// store 계층 validateRubricStatusTransition이 SQL 미실행 후 반환.
+var ErrRubricInvalidStatus = errors.New("rubric invalid status transition")
+
+// ErrRubricArchived archived rubric mutation 시도 (UBI-004 / REQ-RUBRIC-003-S1)
+// status='archived'인 rubric에 update/criteria add/bands add 시도 시 거부.
+// archived는 terminal이며 되돌리기 불가 — 정정 경로는 신규 draft INSERT만.
+var ErrRubricArchived = errors.New("rubric is archived: mutations forbidden")
+
+// ErrRubricWeightOutOfBounds rubric criteria weight CHECK 위반 사전 검증 (REQ-RUBRIC-001-U1)
+// weight < 0 또는 weight > 1.0 시 SQL 미실행 후 반환 (DB CHECK와 이중 방어).
+var ErrRubricWeightOutOfBounds = errors.New("rubric criterion weight out of bounds (0.0-1.0)")
+
+// ErrRubricBandOverlap rubric band 구간 겹침 사전 검증 (OPEN #4 dual defense, REQ-RUBRIC-001-E3)
+// handler-local pre-check 또는 DB EXCLUSION violation (SQLSTATE 23P01) 매핑 대상.
+// 메시지: "등급 구간이 기존 구간과 겹칩니다".
+var ErrRubricBandOverlap = errors.New("rubric band overlaps with existing band")
+
+// ErrRubricAuditWriteFailed rubric mutation의 동일-TX audit INSERT 실패 (REQ-RUBRIC-UBI-002)
+// 호출자가 errors.Is로 식별하여 Rollback하면 entity+audit_logs 양방향 취소 (양방향 원자성).
+// REVIEW-001 ErrScoreReviewRequestAuditWriteFailed 동형.
+var ErrRubricAuditWriteFailed = errors.New("rubric audit write failed")
