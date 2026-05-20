@@ -57,11 +57,13 @@ type Server struct {
 	// 평가 검토 핸들러 (SPEC-AX-REVIEW-001)
 	reviewH *ReviewHandler
 	// 등급 rubric 핸들러 (SPEC-AX-RUBRIC-001, cross-store 3-store 주입)
-	rubricH    *RubricHandler
-	dispatcher *scheduler.CeleryDispatcher
-	grpcServer *grpc.Server
-	httpServer *http.Server
-	logger     *zap.Logger
+	rubricH *RubricHandler
+	// 감사 로그 검색 핸들러 (SPEC-AX-AUDIT-QUERY-001, read-only, admin-only narrowing)
+	auditQueryH *AuditQueryHandler
+	dispatcher  *scheduler.CeleryDispatcher
+	grpcServer  *grpc.Server
+	httpServer  *http.Server
+	logger      *zap.Logger
 	// tracerShutdown — OTel TracerProvider graceful shutdown 클로저 (Sprint 2)
 	// @MX:NOTE: [AUTO] InitTracer가 반환한 shutdown 클로저 — server.shutdown() defer 체인에 등록
 	tracerShutdown func(context.Context) error
@@ -218,6 +220,8 @@ func New(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Server, 
 	s.reviewH = NewReviewHandler(pgStore, pgStore, logger)
 	// SPEC-AX-RUBRIC-001: 등급 rubric 핸들러 (pgStore가 RubricStore+EvalItemStore+ScoreStore 동시 구현)
 	s.rubricH = NewRubricHandler(pgStore, pgStore, pgStore, logger)
+	// SPEC-AX-AUDIT-QUERY-001: 감사 로그 검색 핸들러 (read-only, admin-only narrowing, consumer-only)
+	s.auditQueryH = NewAuditQueryHandler(pgStore, logger)
 
 	return s, nil
 }
@@ -282,6 +286,9 @@ func (s *Server) Run(ctx context.Context) error {
 	// SPEC-AX-RUBRIC-001: 등급 rubric 서브트리 (9 엔드포인트, ServeMux 최장일치 — 구체 경로 우선)
 	innerMux.Handle("/api/v1/rubrics", s.rubricH.Routes())
 	innerMux.Handle("/api/v1/rubrics/", s.rubricH.Routes())
+	// SPEC-AX-AUDIT-QUERY-001: 감사 로그 검색 서브트리 (목록 + 단건 /{id} path-param)
+	innerMux.Handle("/api/v1/audit-logs", s.auditQueryH.Routes())
+	innerMux.Handle("/api/v1/audit-logs/", s.auditQueryH.Routes())
 	innerMux.Handle("/", s.restHandler.Mux())
 
 	outerMux.Handle("/", auth.BuildRESTChain(

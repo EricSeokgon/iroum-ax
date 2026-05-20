@@ -142,3 +142,19 @@ var ErrRubricBandOverlap = errors.New("rubric band overlaps with existing band")
 // 호출자가 errors.Is로 식별하여 Rollback하면 entity+audit_logs 양방향 취소 (양방향 원자성).
 // REVIEW-001 ErrScoreReviewRequestAuditWriteFailed 동형.
 var ErrRubricAuditWriteFailed = errors.New("rubric audit write failed")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SPEC-AX-AUDIT-QUERY-001 sentinels (감사 로그 검색 API 도메인, read-only)
+// SCORE-API-001 errors.go drift lesson [HARD]: spec.md §2.1 + §2.3 Drift-Guard
+// manifest 양쪽에 EXPLICIT 부착 — manifest 분실 방지. 정확히 2개 신규 추가, 기존 무수정.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ErrAuditQueryInvalidFilter 감사 로그 검색 필터 사전 검증 실패 (REQ-AUDIT-QUERY-001-U1)
+// malformed UUID resource_id / non-RFC3339 timestamp / length(resource_type>32, user_id>64) 초과
+// 핸들러 계층이 SQL 미실행 후 반환 (pre-store validation — store 미진입).
+var ErrAuditQueryInvalidFilter = errors.New("audit query invalid filter")
+
+// ErrAuditQueryInvalidTimeRange 감사 로그 검색 시간 범위 부당 (REQ-AUDIT-QUERY-001-U1)
+// since > until (역순 거부) 또는 future timestamp (현재 시각 초과 거부 — business logic).
+// 핸들러 계층이 SQL 미실행 후 반환 (pre-store validation — store 미진입).
+var ErrAuditQueryInvalidTimeRange = errors.New("audit query invalid time range")

@@ -47,11 +47,37 @@ type WorkflowTx interface {
 	GetWorkflow(ctx context.Context, id string) (*types.Workflow, error)
 	// UpdateWorkflowResult 워크플로우 resultJSON을 갱신 (RUNNING → COMPLETED 전이 시 사용)
 	UpdateWorkflowResult(ctx context.Context, id string, resultJSON []byte) error
+	// QueryAuditLogs audit_logs 테이블을 5-필터 AND + offset/limit으로 검색하고 결과 + total을 반환
+	// (SPEC-AX-AUDIT-QUERY-001 REQ-AUDIT-QUERY-001-E1, OPEN #5/#6 RESOLVED).
+	// ORDER BY timestamp DESC (audit_logs_user_id_timestamp_idx partial 활용),
+	// 매개변수 바인딩($N) — SQL injection 0건. 결과 0건 → empty slice + total=0.
+	// total은 COUNT(*) OVER() window function — 1 round-trip.
+	// read-only: audit_logs INSERT 0건 (REQ-AUDIT-QUERY-UBI-002).
+	QueryAuditLogs(ctx context.Context, filter AuditLogFilter, limit, offset int) (events []*audit.Event, total int64, err error)
 	// Commit 현재 트랜잭션을 커밋하여 모든 변경사항을 영속화
 	Commit(ctx context.Context) error
 	// Rollback 현재 트랜잭션을 롤백하여 모든 변경사항을 취소
 	// defer로 호출하는 것이 안전하며, Commit 후 호출 시 무시
 	Rollback(ctx context.Context) error
+}
+
+// AuditLogFilter audit_logs 검색 필터 (5-필터 AND 조합, 모두 optional pointer)
+// nil 포인터 = "필터 미적용", non-nil = "해당 값으로 WHERE AND 추가"
+// SPEC-AX-AUDIT-QUERY-001 REQ-AUDIT-QUERY-001-S2 / §6 OPEN #2 RESOLVED (AND only)
+// 동적 SQL 빌더는 audit_query.go가 파라미터 바인딩 placeholder($N)로 안전 결합.
+type AuditLogFilter struct {
+	// Action audit.Action 자유 문자열 매치 (audit_logs.action VARCHAR(64))
+	Action *string
+	// ResourceType audit_logs.resource_type VARCHAR(32) — score/rubric/evidence/evaluation_item 등
+	ResourceType *string
+	// ResourceID audit_logs.resource_id UUID — single ID lookup 시 사용
+	ResourceID *uuid.UUID
+	// UserID audit_logs.user_id VARCHAR(64) — cli-anonymous 포함
+	UserID *string
+	// Since audit_logs.timestamp >= since (inclusive)
+	Since *time.Time
+	// Until audit_logs.timestamp <= until (inclusive)
+	Until *time.Time
 }
 
 // EvidenceStore 증빙 영속성 최상위 인터페이스 (SPEC-AX-EVID-001 REQ-EVID-001)

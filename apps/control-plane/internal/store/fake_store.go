@@ -209,6 +209,72 @@ func (tx *FakeTx) UpdateWorkflowResult(_ context.Context, id string, resultJSON 
 	return nil
 }
 
+// QueryAuditLogs SPEC-AX-AUDIT-QUERY-001 FakeTx 인메모리 구현.
+// store.AuditLogs를 5-필터 AND + offset/limit으로 필터링하고 events + total을 반환한다.
+// PgWorkflowTx.QueryAuditLogs와 동일 contract (sort, filter, paginate 결정성).
+// 단순 sort.Slice(timestamp DESC) + slice filter — 통합 테스트는 pgx 구현이 담당.
+func (tx *FakeTx) QueryAuditLogs(
+	_ context.Context, filter AuditLogFilter, limit, offset int,
+) ([]*audit.Event, int64, error) {
+	tx.store.mu.Lock()
+	all := make([]*audit.Event, 0, len(tx.store.AuditLogs))
+	for _, e := range tx.store.AuditLogs {
+		all = append(all, e)
+	}
+	tx.store.mu.Unlock()
+
+	// 5-필터 AND 필터링
+	matched := make([]*audit.Event, 0, len(all))
+	for _, e := range all {
+		if filter.Action != nil && string(e.Action) != *filter.Action {
+			continue
+		}
+		if filter.ResourceType != nil && e.ResourceType != *filter.ResourceType {
+			continue
+		}
+		if filter.ResourceID != nil && e.ResourceID != *filter.ResourceID {
+			continue
+		}
+		if filter.UserID != nil && e.UserID != *filter.UserID {
+			continue
+		}
+		if filter.Since != nil && e.Timestamp.Before(*filter.Since) {
+			continue
+		}
+		if filter.Until != nil && e.Timestamp.After(*filter.Until) {
+			continue
+		}
+		matched = append(matched, e)
+	}
+
+	// ORDER BY timestamp DESC
+	sort.Slice(matched, func(i, j int) bool {
+		return matched[i].Timestamp.After(matched[j].Timestamp)
+	})
+
+	total := int64(len(matched))
+
+	// LIMIT/OFFSET 슬라이싱
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(matched) {
+		return []*audit.Event{}, total, nil
+	}
+	end := offset + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	page := matched[offset:end]
+	// 결과 슬라이스 deep-copy로 격리 (테스트 격리)
+	result := make([]*audit.Event, len(page))
+	for i, e := range page {
+		evCopy := *e
+		result[i] = &evCopy
+	}
+	return result, total, nil
+}
+
 // GetWorkflow 현재 FakeStore의 영속 저장소에서 워크플로우를 조회
 // Sprint 2 상태 머신이 전이 전 현재 상태를 읽기 위해 사용
 // 실제 pgx 구현에서는 SELECT ... FOR UPDATE로 대체됨 (Sprint 3)
