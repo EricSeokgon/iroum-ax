@@ -1,0 +1,22 @@
+{
+  "thresholds": [
+    {
+      "id": "th-001",
+      "scope": "경영성과",
+      "excellent": 90,
+      "good": 75,
+      "fair": 60,
+      "poor": 0,
+      "updated_at": "2024-03-01T09:00:00Z"
+    },
+    {
+      "id": "th-002",
+      "scope": "재무",
+      "excellent": 88,
+      "good": 70,
+      "fair": 55,
+      "poor": 0,
+      "updated_at": "2024-03-01T09:00:00Z"
+    }
+  ]
+}

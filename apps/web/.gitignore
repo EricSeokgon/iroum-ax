@@ -14,3 +14,16 @@ out/
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# E2E 테스트 환경 변수 (실제 시크릿)
+.env.test
+# .env.test.example은 루트 .gitignore의 .env.* 패턴에 걸리므로 명시적으로 허용
+!.env.test.example
+
+# Playwright auth storageState (쿠키/세션 캐시)
+e2e/.auth/
+
+# Playwright 산출물
+playwright-report/
+test-results/
+.playwright/

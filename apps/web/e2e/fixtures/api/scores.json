@@ -1,0 +1,13 @@
+{
+  "items": [
+    {
+      "id": "sc-001",
+      "evaluation_item_id": "ei-001",
+      "score": 85,
+      "comment": "목표 초과 달성",
+      "submitted_at": "2024-03-10T09:00:00Z",
+      "submitted_by": "이영희"
+    }
+  ],
+  "total": 1
+}

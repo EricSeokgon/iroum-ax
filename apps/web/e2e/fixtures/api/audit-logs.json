@@ -1,0 +1,42 @@
+{
+  "items": [
+    {
+      "id": "al-001",
+      "action": "EVIDENCE_UPLOAD",
+      "actor": "홍길동",
+      "resource": "ev-001",
+      "timestamp": "2024-03-01T09:00:00Z"
+    },
+    {
+      "id": "al-002",
+      "action": "SCORE_SUBMIT",
+      "actor": "이영희",
+      "resource": "sc-001",
+      "timestamp": "2024-03-10T09:00:00Z"
+    },
+    {
+      "id": "al-003",
+      "action": "REVIEW_SUBMIT",
+      "actor": "박철수",
+      "resource": "rv-001",
+      "timestamp": "2024-03-15T09:00:00Z"
+    },
+    {
+      "id": "al-004",
+      "action": "REVIEW_APPROVE",
+      "actor": "admin",
+      "resource": "rv-002",
+      "timestamp": "2024-03-20T10:00:00Z"
+    },
+    {
+      "id": "al-005",
+      "action": "RUBRIC_UPDATE",
+      "actor": "admin",
+      "resource": "threshold-001",
+      "timestamp": "2024-03-21T09:00:00Z"
+    }
+  ],
+  "total": 5,
+  "limit": 20,
+  "offset": 0
+}
