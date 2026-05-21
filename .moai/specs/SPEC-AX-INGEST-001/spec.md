@@ -1,8 +1,8 @@
 ---
 id: SPEC-AX-INGEST-001
 title: Ingestion Worker 실제 구현 — VLM OCR + RAG 임베딩 + Go 채점 트리거
-version: "0.1.2"
-status: draft
+version: "0.1.0"
+status: implemented
 created: "2026-05-21"
 updated: "2026-05-21"
 author: ircp

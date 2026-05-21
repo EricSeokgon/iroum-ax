@@ -26,6 +26,13 @@ import logging
 from typing import Any
 from uuid import uuid4
 
+from pkg.errors.custom_errors import (
+    ExternalLLMBlockedError,
+    IndexRebuildingError,
+    IngestionEmptyError,
+)
+from pkg.models.criterion import Criterion
+
 from pipelines.callbacks.control_plane import post_callback
 from pipelines.config.settings import settings, validate_llm_endpoint
 from pipelines.ingestion.document_metadata import DocumentMetadataClient
@@ -34,12 +41,6 @@ from pipelines.ingestion.text_chunker import TextChunker
 from pipelines.ingestion.vlm_processor import VLMProcessor
 from pipelines.mapping.embedding_service import EmbeddingService
 from pipelines.mapping.vector_store import VectorStore
-from pkg.errors.custom_errors import (
-    ExternalLLMBlockedError,
-    IndexRebuildingError,
-    IngestionEmptyError,
-)
-from pkg.models.criterion import Criterion
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ def _execute(
     *,
     document_id: str,
     workflow_id: str,
-    **kwargs: Any,
+    **kwargs: Any,  # noqa: ANN401
 ) -> dict[str, Any]:
     """SPEC-AX-INGEST-001 — VLM OCR + RAG + Go 채점 트리거 파이프라인.
 
@@ -321,7 +322,7 @@ try:  # noqa: SIM105 — celery 미설치 환경 분기 명시
     _app = create_celery_app()
 
     @_app.task(name=TASK_NAME, bind=True, max_retries=3)  # type: ignore[misc]
-    def run(self, document_id: str, *, workflow_id: str, **kwargs: Any) -> dict[str, Any]:  # noqa: ANN001, ARG001
+    def run(self, document_id: str, *, workflow_id: str, **kwargs: Any) -> dict[str, Any]:  # noqa: ANN001, ANN401, ARG001
         """Celery task entry — REQ-INTEG-001 정확 task name 매칭.
 
         AC-INTEG-001-1: Go dispatcher RPUSH 후 Python worker dequeue → 본 함수 호출.
@@ -331,7 +332,7 @@ try:  # noqa: SIM105 — celery 미설치 환경 분기 명시
 except ImportError:
     # celery 미설치 — 단위 테스트 격리 모드. run을 plain function으로 노출.
 
-    def run(document_id: str, *, workflow_id: str, **kwargs: Any) -> dict[str, Any]:  # type: ignore[no-redef]
+    def run(document_id: str, *, workflow_id: str, **kwargs: Any) -> dict[str, Any]:  # type: ignore[no-redef]  # noqa: ANN401
         """단위 테스트 격리용 plain function (celery 미설치 시)."""
         return _execute(document_id=document_id, workflow_id=workflow_id, **kwargs)
 
