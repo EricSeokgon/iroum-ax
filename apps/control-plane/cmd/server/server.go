@@ -60,7 +60,9 @@ type Server struct {
 	rubricH *RubricHandler
 	// 감사 로그 검색 핸들러 (SPEC-AX-AUDIT-QUERY-001, read-only, admin-only narrowing)
 	auditQueryH *AuditQueryHandler
-	dispatcher  *scheduler.CeleryDispatcher
+	// Python→Go 워크플로우 콜백 핸들러 (SPEC-AX-INTEG-001, RUNNING→terminal 전이 전담)
+	callbackH  *WorkflowCallbackHandler
+	dispatcher *scheduler.CeleryDispatcher
 	grpcServer  *grpc.Server
 	httpServer  *http.Server
 	logger      *zap.Logger
@@ -222,6 +224,8 @@ func New(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Server, 
 	s.rubricH = NewRubricHandler(pgStore, pgStore, pgStore, logger)
 	// SPEC-AX-AUDIT-QUERY-001: 감사 로그 검색 핸들러 (read-only, admin-only narrowing, consumer-only)
 	s.auditQueryH = NewAuditQueryHandler(pgStore, logger)
+	// SPEC-AX-INTEG-001: Python→Go 워크플로우 콜백 핸들러 (RUNNING→terminal 단일 TX 전이)
+	s.callbackH = NewWorkflowCallbackHandler(pgStore, rec, logger)
 
 	return s, nil
 }
@@ -289,6 +293,10 @@ func (s *Server) Run(ctx context.Context) error {
 	// SPEC-AX-AUDIT-QUERY-001: 감사 로그 검색 서브트리 (목록 + 단건 /{id} path-param)
 	innerMux.Handle("/api/v1/audit-logs", s.auditQueryH.Routes())
 	innerMux.Handle("/api/v1/audit-logs/", s.auditQueryH.Routes())
+	// SPEC-AX-INTEG-001: Python→Go 콜백 라우트 — restHandler 보다 먼저 등록하여 최장일치 우선
+	// (POST /api/v1/workflows/{id}/callback. ServeMux Go1.22+ path-param.
+	// /api/v1/workflows/{id} 등 다른 워크플로우 REST는 restHandler.Mux()가 처리.)
+	innerMux.Handle("/api/v1/workflows/{id}/callback", s.callbackH.Routes())
 	innerMux.Handle("/", s.restHandler.Mux())
 
 	outerMux.Handle("/", auth.BuildRESTChain(
