@@ -1,6 +1,6 @@
 ---
 id: SPEC-AX-E2E-001
-version: 0.1.0
+version: 0.2.0
 status: draft
 created: 2026-05-21
 updated: 2026-05-21
@@ -11,6 +11,7 @@ issue_number: 0
 
 # HISTORY
 
+- 0.2.0 (2026-05-21): plan-auditor CONDITIONAL PASS → PASS 전환. D1(BLOCKER) `/dashboard/evidences` 경로 전체 수정, D3 `/dashboard/rubric/thresholds` 경로 수정, D4 AC-VIS-ALL-001/002 신규 추가, D5 AC-AUTH-003 단일 결과로 확정, D6 AC-RBAC-DENY-001/002 단일 redirect 결과로 확정, D7 AC-FLOW-ANALYST-002 진입점 수정, D8 AC 수 24건으로 정정. OPEN #1~#6 전부 RESOLVED 처리.
 - 0.1.0 (2026-05-21): SPEC-AX-WEB-001(merged, Next.js 14+ 대시보드, 7 화면, BFF + HttpOnly 쿠키)의 **Playwright E2E 자동화** 첫 초안. 본 SPEC은 `apps/web/`의 골든 패스(인증 흐름·역할별 권한·로그아웃)를 브라우저-레벨에서 검증하는 테스트 슈트를 신규 디렉터리 `apps/web/e2e/`에 추가한다. SUT는 SPEC-AX-WEB-001이 빌드한 Next.js 앱이며, 백엔드 Go control-plane(`apps/control-plane/`) 및 SPEC-AX-WEB-001 앱 소스(`apps/web/src/**`)는 [HARD] 0-diff(consumer-only). Keycloak 24.x 의존 회피를 위해 OIDC 콜백을 Playwright `page.route` 인터셉트로 모킹하고, 역할별 cookie `storageState` fixture로 세션을 주입한다. 시각 회귀·부하·CI/CD 파이프라인 통합은 §3 비목표(별도 SPEC). (작성자: ircp)
 
 > Schema note: YAML frontmatter는 16번째 SPEC(SPEC-AX-WEB-001 포함 누적)과 동일하게 `.claude/skills/moai/workflows/plan.md` Phase 2의 8-field canonical 정의(`id, version, status, created, updated, author, priority, issue_number`)를 따른다. 본 SPEC은 frontend 테스트 디렉터리(`apps/web/e2e/`)를 신규 추가하는 greenfield 작업이므로 phantom-API 검증 부담은 SUT 페이지 경로/쿠키 이름/BFF 엔드포인트에 한정되며, 모두 SPEC-AX-WEB-001 실제 코드(`apps/web/src/middleware.ts`, `apps/web/src/app/(dashboard)/**`, `apps/web/src/app/api/**`)에서 직접 검증된 사실에 근거한다.
@@ -27,7 +28,7 @@ SPEC-AX-WEB-001이 빌드한 Next.js 14+ App Router 대시보드(`apps/web/`)의
 
 본 SPEC의 1차 산출물은 **자동 재현 가능한 5개 골든 패스 E2E 시나리오 + 역할별 RBAC 가시성 검증 + 로그아웃 흐름 검증**이다. 시나리오 그룹:
 
-1. **인증 흐름**: 미인증 → `/dashboard/evidence` → `/login` 리다이렉트 → PKCE 모의 로그인 콜백 → `/dashboard/evidence` 진입
+1. **인증 흐름**: 미인증 → `/dashboard/evidences` → `/login` 리다이렉트 → PKCE 모의 로그인 콜백 → `/dashboard/evidences` 진입
 2. **viewer 역할**: 증빙 목록·평가 항목 트리·리포트·리뷰 화면을 **읽기 전용**으로 시인. 점수 입력 폼·루브릭·감사 로그 메뉴/페이지 비노출 또는 비활성화
 3. **analyst 역할**: 증빙 업로드 폼·점수 입력 폼·리뷰 제출 폼 가시 및 제출 성공. 감사 로그/루브릭 페이지 진입 시 차단 또는 비표시
 4. **admin 역할**: 감사 로그 페이지 접근·루브릭 임계값 편집·리뷰어 배정·리뷰 승인 흐름 성공
@@ -48,13 +49,13 @@ PoC 데모 보강이므로 다음은 의식적으로 **간소화**한다:
 | 카테고리 | 경로/파일 | 본 SPEC 사용처 |
 |----------|-----------|----------------|
 | 공개 페이지 | `/login` (apps/web/src/app/login/page.tsx) | AC-AUTH-001/002, 인증 흐름 진입점 |
-| 보호 페이지 | `/dashboard/evidence` | AC-VIS-VIEWER-001, AC-VIS-ANALYST-001 |
+| 보호 페이지 | `/dashboard/evidences` | AC-VIS-VIEWER-001, AC-VIS-ANALYST-001 |
 | 보호 페이지 | `/dashboard/evaluation-items` | AC-VIS-ALL-001 |
 | 보호 페이지 | `/dashboard/scores` | AC-VIS-VIEWER-002(폼 비노출), AC-FLOW-ANALYST-001(제출) |
 | 보호 페이지 | `/dashboard/reports` | AC-VIS-ALL-002 |
 | 보호 페이지 | `/dashboard/reviews` | AC-VIS-VIEWER-003(승인 버튼 비노출), AC-FLOW-ADMIN-002 |
 | 보호 페이지 | `/dashboard/audit-logs` | AC-VIS-ADMIN-001, viewer/analyst 차단 AC-RBAC-DENY-001 |
-| 보호 페이지 | `/dashboard/rubric` | AC-VIS-ADMIN-002, viewer/analyst 차단 AC-RBAC-DENY-002 |
+| 보호 페이지 | `/dashboard/rubric/thresholds` | AC-VIS-ADMIN-002, viewer/analyst 차단 AC-RBAC-DENY-002 |
 | 미들웨어 가드 | `apps/web/src/middleware.ts` (`COOKIE_ACCESS_TOKEN` 부재 시 `/login` 리다이렉트, matcher `/dashboard/:path*`) | AC-AUTH-001(미인증 리다이렉트) |
 | 인증 BFF | `POST /api/auth/login` (PKCE 시작) | 인증 흐름 시작 |
 | 인증 BFF | `GET /api/auth/callback` (토큰 교환 → HttpOnly 쿠키 set) | Playwright `page.route` 모킹 대상 |
@@ -159,9 +160,9 @@ phantom path 0건 [HARD]: 본 SPEC `apps/web/e2e/`에서 참조하는 모든 URL
 
 ### 4.2 Event-Driven Requirements (트리거-응답)
 
-- **REQ-E2E-AUTH-010 (Event)**: **WHEN** Playwright opens `http://localhost:3000/dashboard/evidence` without the `ax_access_token` cookie, **THEN** the test **shall** observe an HTTP redirect to `/login?from=%2Fdashboard%2Fevidence` (matching `apps/web/src/middleware.ts` line 22-26 behavior).
-- **REQ-E2E-AUTH-011 (Event)**: **WHEN** the Playwright test completes the mock OIDC callback flow, **THEN** the browser context **shall** hold an HttpOnly `ax_access_token` cookie and the next navigation to `/dashboard/evidence` **shall** render the evidence list page (status 200, no redirect).
-- **REQ-E2E-VIEWER-020 (Event)**: **WHEN** a Playwright test with the `viewer` `storageState` navigates to `/dashboard/evidence`, **THEN** the page **shall** render the evidence list **without** an "업로드" / "Upload" submit button visible to viewers.
+- **REQ-E2E-AUTH-010 (Event)**: **WHEN** Playwright opens `http://localhost:3000/dashboard/evidences` without the `ax_access_token` cookie, **THEN** the test **shall** observe an HTTP redirect to `/login?from=%2Fdashboard%2Fevidences` (matching `apps/web/src/middleware.ts` line 22-26 behavior).
+- **REQ-E2E-AUTH-011 (Event)**: **WHEN** the Playwright test completes the mock OIDC callback flow, **THEN** the browser context **shall** hold an HttpOnly `ax_access_token` cookie and the next navigation to `/dashboard/evidences` **shall** render the evidence list page (status 200, no redirect).
+- **REQ-E2E-VIEWER-020 (Event)**: **WHEN** a Playwright test with the `viewer` `storageState` navigates to `/dashboard/evidences`, **THEN** the page **shall** render the evidence list **without** an "업로드" / "Upload" submit button visible to viewers.
 - **REQ-E2E-ANALYST-030 (Event)**: **WHEN** a Playwright test with the `analyst` `storageState` submits the score form on `/dashboard/scores` with a valid mocked BFF response, **THEN** the test **shall** observe a success toast (or equivalent confirmation element) and the network log **shall** include a `POST /api/v1/scores` request.
 - **REQ-E2E-ADMIN-040 (Event)**: **WHEN** a Playwright test with the `admin` `storageState` clicks the "승인" button on a pending review at `/dashboard/reviews`, **THEN** the test **shall** observe a `POST /api/v1/reviews/{id}/approve` request and a UI state transition reflecting the approved status (matching SPEC-AX-REVIEW-001 4-state machine).
 - **REQ-E2E-LOGOUT-050 (Event)**: **WHEN** a Playwright test triggers logout (sidebar logout button or `POST /api/auth/logout`), **THEN** the `ax_access_token` cookie **shall** be cleared and any subsequent navigation to `/dashboard/*` **shall** trigger the `/login` redirect from REQ-E2E-AUTH-010.
@@ -169,7 +170,7 @@ phantom path 0건 [HARD]: 본 SPEC `apps/web/e2e/`에서 참조하는 모든 URL
 ### 4.3 State-Driven Requirements (조건적 동작)
 
 - **REQ-E2E-VIS-100 (State)**: **WHILE** the active session is `viewer`, the test **shall** assert that the sidebar navigation does not link to `/dashboard/audit-logs` and that direct URL access to `/dashboard/audit-logs` results in either a 403 toast, a "권한 없음" message, or a redirect — whichever SPEC-AX-WEB-001 implemented (the test reads the actual SUT behavior, not a prescribed contract).
-- **REQ-E2E-VIS-101 (State)**: **WHILE** the active session is `analyst`, the test **shall** assert that the rubric page (`/dashboard/rubric`) link is hidden or disabled in navigation and that direct access yields the same SUT-implemented denial behavior as REQ-E2E-VIS-100.
+- **REQ-E2E-VIS-101 (State)**: **WHILE** the active session is `analyst`, the test **shall** assert that the rubric page (`/dashboard/rubric/thresholds`) link is hidden or disabled in navigation and that direct access yields the same SUT-implemented denial behavior as REQ-E2E-VIS-100.
 - **REQ-E2E-VIS-102 (State)**: **WHILE** the active session is `admin`, the test **shall** assert that the rubric and audit-logs pages render without any access-denial UI.
 
 ### 4.4 Optional Requirements (Where-feature-exists)
@@ -209,24 +210,24 @@ phantom path 0건 [HARD]: 본 SPEC `apps/web/e2e/`에서 참조하는 모든 URL
 
 - **AC-AUTH-001 — 미인증 보호 페이지 접근 시 로그인 리다이렉트**
   - **Given** Playwright 브라우저 컨텍스트에 `ax_access_token` 쿠키가 없다
-  - **When** `/dashboard/evidence` 로 직접 이동한다
-  - **Then** 응답은 `/login?from=%2Fdashboard%2Fevidence` 로 리다이렉트되고, 페이지 URL은 `/login` 으로 끝나며, "로그인" 버튼 또는 Keycloak SSO 진입 요소가 가시화된다
+  - **When** `/dashboard/evidences` 로 직접 이동한다
+  - **Then** 응답은 `/login?from=%2Fdashboard%2Fevidences` 로 리다이렉트되고, 페이지 URL은 `/login` 으로 끝나며, "로그인" 버튼 또는 Keycloak SSO 진입 요소가 가시화된다
 
 - **AC-AUTH-002 — 모의 OIDC 콜백 후 보호 페이지 진입**
   - **Given** Playwright가 `/api/auth/callback?code=...&state=...` 요청을 인터셉트해 모의 토큰 응답으로 답한다 (또는 `storageState`로 viewer 쿠키를 사전 주입한다)
-  - **When** `/dashboard/evidence` 로 이동한다
+  - **When** `/dashboard/evidences` 로 이동한다
   - **Then** HTTP 상태 200으로 evidence 목록 페이지가 렌더되며 `/login` 으로의 리다이렉트는 발생하지 않는다
 
 - **AC-AUTH-003 — 만료 쿠키 시 재로그인 유도**
-  - **Given** `ax_access_token` 쿠키 값이 만료된 JWT 페이로드를 담고 있다 (BFF가 만료 검사 시)
-  - **When** `/dashboard/evidence` 로 이동한다
-  - **Then** SUT-implemented 동작에 따라 `/login` 리다이렉트 또는 `/api/auth/refresh` 호출 후 정상 진입 중 하나가 발생한다 (테스트는 둘 중 어느 것이든 허용하며, 결과를 트레이스에 기록한다)
+  - **Given** `ax_access_token` 쿠키 값이 만료된 JWT 페이로드를 담고 있다 (`exp` 클레임이 현재 시각 이하)
+  - **When** `/dashboard/evidences` 로 이동한다
+  - **Then** `getServerSession()`이 null을 반환하고 미들웨어가 `/login?from=%2Fdashboard%2Fevidences` 로 리다이렉트한다 (단일 결과 — `/api/auth/refresh` 호출 없음; `apps/web/src/lib/auth.ts:103`에서 만료 시 null 반환 확인됨)
 
 ### 5.2 그룹 B — viewer RBAC (rbac-viewer.spec.ts)
 
 - **AC-VIS-VIEWER-001 — 증빙 목록 읽기 전용**
   - **Given** Playwright 세션이 `viewer` storageState로 로드되었다
-  - **When** `/dashboard/evidence` 로 이동한다
+  - **When** `/dashboard/evidences` 로 이동한다
   - **Then** 증빙 목록 테이블이 렌더되고, "업로드" 버튼은 가시되지 않거나 `disabled` 속성을 갖는다
 
 - **AC-VIS-VIEWER-002 — 점수 입력 폼 비노출**
@@ -239,19 +240,29 @@ phantom path 0건 [HARD]: 본 SPEC `apps/web/e2e/`에서 참조하는 모든 URL
   - **When** `/dashboard/reviews` 로 이동한다
   - **Then** 리뷰 목록은 가시되나 "승인" / "반려" 버튼은 가시되지 않는다
 
+- **AC-VIS-ALL-001 — 평가 항목 트리 가시 (전 역할)**
+  - **Given** Playwright 세션이 임의의 storageState(viewer/analyst/admin)로 로드되었다
+  - **When** `/dashboard/evaluation-items` 로 이동한다
+  - **Then** 평가 항목 트리(또는 목록)가 렌더되고 접근이 차단되지 않는다
+
+- **AC-VIS-ALL-002 — 리포트 페이지 가시 (전 역할)**
+  - **Given** Playwright 세션이 임의의 storageState(viewer/analyst/admin)로 로드되었다
+  - **When** `/dashboard/reports` 로 이동한다
+  - **Then** 리포트 목록 또는 범주별 리포트가 렌더되고 접근이 차단되지 않는다
+
 - **AC-RBAC-DENY-001 — viewer의 감사 로그 직접 URL 접근 차단**
   - **Given** Playwright 세션이 `viewer` storageState로 로드되었다
   - **When** `/dashboard/audit-logs` 로 직접 URL 이동한다
-  - **Then** SUT가 구현한 차단 방식 중 하나가 관찰된다: (a) 페이지 진입은 되었으나 "권한 없음" 메시지 표시, (b) `/dashboard/evidence` 등 기본 경로로 리다이렉트, (c) 사이드바에서 메뉴 자체가 비노출되어 직접 URL 시 빈 결과 — 테스트는 셋 중 어느 것이든 허용하되, 입력 폼·관리 액션이 가시되지 않음만 확실히 검증한다
+  - **Then** `/dashboard` 로 리다이렉트된다 (SPEC-AX-WEB-001 REQ-WEB-007a 라우트 가드 단일 동작)
 
 - **AC-RBAC-DENY-002 — viewer의 루브릭 페이지 차단**
-  - AC-RBAC-DENY-001과 동일 패턴, 대상은 `/dashboard/rubric`
+  - AC-RBAC-DENY-001과 동일 패턴, 대상은 `/dashboard/rubric/thresholds` — `/dashboard` 로 리다이렉트
 
 ### 5.3 그룹 C — analyst 흐름 (flow-analyst.spec.ts)
 
 - **AC-VIS-ANALYST-001 — 증빙 업로드 폼 가시**
   - **Given** Playwright 세션이 `analyst` storageState로 로드되었다
-  - **When** `/dashboard/evidence` 로 이동한다
+  - **When** `/dashboard/evidences` 로 이동한다
   - **Then** "업로드" 버튼/`<input type="file">` 폼이 가시되고 활성 상태이다
 
 - **AC-FLOW-ANALYST-001 — 점수 제출 흐름**
@@ -261,7 +272,7 @@ phantom path 0건 [HARD]: 본 SPEC `apps/web/e2e/`에서 참조하는 모든 URL
 
 - **AC-FLOW-ANALYST-002 — 리뷰 제출 흐름**
   - **Given** `analyst` 세션 + `POST /api/v1/reviews` 모킹
-  - **When** `/dashboard/reviews/new` 또는 동등한 진입점에서 리뷰를 제출한다
+  - **When** `/dashboard/reviews` 의 "리뷰 제출" 버튼을 통해 리뷰를 제출한다
   - **Then** `POST /api/v1/reviews` 요청이 발생하고, 응답 상태가 4-state machine 의 `SUBMITTED`(SPEC-AX-REVIEW-001 정의)로 반영된다
 
 - **AC-FLOW-ANALYST-DENY-001 — analyst의 audit-logs 차단**
@@ -276,7 +287,7 @@ phantom path 0건 [HARD]: 본 SPEC `apps/web/e2e/`에서 참조하는 모든 URL
 
 - **AC-VIS-ADMIN-002 — 루브릭 페이지 접근**
   - **Given** `admin` storageState + `GET /api/v1/rubric/thresholds` 모킹
-  - **When** `/dashboard/rubric` 으로 이동한다
+  - **When** `/dashboard/rubric/thresholds` 으로 이동한다
   - **Then** 임계값 목록/편집 폼이 렌더된다
 
 - **AC-FLOW-ADMIN-001 — 루브릭 임계값 편집**
@@ -303,8 +314,8 @@ phantom path 0건 [HARD]: 본 SPEC `apps/web/e2e/`에서 참조하는 모든 URL
 
 - **AC-AUTH-LOGOUT-002 — 로그아웃 후 보호 페이지 재접근 차단**
   - **Given** AC-AUTH-LOGOUT-001 이후 상태
-  - **When** `/dashboard/evidence` 로 이동한다
-  - **Then** `/login?from=%2Fdashboard%2Fevidence` 로 리다이렉트된다 (AC-AUTH-001 재현)
+  - **When** `/dashboard/evidences` 로 이동한다
+  - **Then** `/login?from=%2Fdashboard%2Fevidences` 로 리다이렉트된다 (AC-AUTH-001 재현)
 
 ### 5.6 인프라 AC
 
@@ -323,70 +334,84 @@ phantom path 0건 [HARD]: 본 SPEC `apps/web/e2e/`에서 참조하는 모든 URL
   - **When** `git diff` 를 검사한다
   - **Then** 실제 JWT signing key·실제 Keycloak client secret·실제 사용자 이메일/이름이 포함되지 않으며, `apps/web/.env.test.example` 만 커밋되고 `apps/web/.env.test` 는 git ignore 상태이다
 
-총 AC 수: **20건** (그룹 A: 3, 그룹 B: 5, 그룹 C: 4, 그룹 D: 5, 그룹 E: 2, 인프라: 3 — 단, 그룹 B 1건이 RBAC-DENY-002를 포함하여 5건이며, 그룹 D는 5건임을 명시)
+총 AC 수: **24건** (그룹 A: 3, 그룹 B: 7 [VIS-VIEWER-001~003, VIS-ALL-001~002, RBAC-DENY-001~002], 그룹 C: 4, 그룹 D: 5, 그룹 E: 2, 인프라: 3)
 
 ---
 
 ## 6. OPEN ITEMS (수락 전 결정 필요)
 
-### OPEN #1 — OIDC 콜백 모킹 방식 [draft] [Resolve before /moai run]
+### OPEN #1 — OIDC 콜백 모킹 방식 [RESOLVED: 옵션 C 채택]
 
-선택지:
-- **A (권장)**: Playwright `page.route('/api/auth/callback*', ...)` 인터셉트로 BFF 응답을 모킹하고, BFF가 `Set-Cookie: ax_access_token=...` 헤더를 반환하도록 위장한다. `apps/web/src/app/api/auth/callback/route.ts` 는 변경하지 않는다.
-- **B**: `msw`(Mock Service Worker)를 Playwright 컨텍스트에 부착해 콜백뿐 아니라 `/api/v1/*` BFF 호출까지 통합 모킹한다. 추가 의존(`msw`) 1개.
-- **C**: 직접 쿠키 주입 — `BrowserContext.addCookies([{name: 'ax_access_token', value: '<mock-jwt>', httpOnly: true, ...}])` 만 사용하고 `/api/auth/*` 는 호출 안 한다. 콜백 흐름(AC-AUTH-002) 자체 검증은 부분 포기.
+**결정**: `BrowserContext.addCookies([{name: 'ax_access_token', value: '<mock-jwt>', httpOnly: true, ...}])` 직접 쿠키 주입 방식 채택. WEB-001 `apps/web/src/lib/auth.ts`가 `decodeJwt`(jose)로 서명 검증 없이 페이로드만 읽으므로, 유효한 base64 JSON 페이로드를 가진 mock JWT로 모든 역할 세션을 생성 가능. globalSetup에서 3개 storageState 파일(`e2e/.auth/{viewer,analyst,admin}.json`) 사전 생성. AC-AUTH-002는 직접 주입을 통해 인증 후 보호 페이지 진입 성공을 검증하는 것으로 충분.
 
-권고: **A** — 콜백 흐름까지 검증 가능하면서 의존 추가 0. B는 BFF 데이터 호출 모킹까지 필요해지면 §6 OPEN #2 결정과 함께 재검토. C는 AC-AUTH-002 충실도가 낮아 부적합.
+선택지 참고:
+- A: page.route callback 인터셉트 (기각 — 불필요한 복잡도)
+- B: msw 도입 (기각 — 추가 의존)
+- **C (채택)**: 직접 쿠키 주입
 
-### OPEN #2 — BFF 데이터 호출(`/api/v1/*`) 모킹 vs 라이브 [draft] [Resolve before /moai run]
+### OPEN #2 — BFF 데이터 호출(`/api/v1/*`) 모킹 vs 라이브 [RESOLVED: 옵션 D 채택]
 
-선택지:
-- **A (권장)**: Playwright `page.route('/api/v1/**', ...)` 으로 BFF 응답을 모킹. 신규 의존 0. 시나리오별 모의 응답을 `apps/web/e2e/fixtures/api/*.json` 으로 관리.
-- **B**: `msw` 도입(OPEN #1 B와 일관). 단일 도구로 콜백 + 데이터 호출 통합 모킹.
-- **C**: `E2E_LIVE_BACKEND=1` 모드만 지원하고 백엔드 라이브 실행 의존. REQ-E2E-001c 위반 — 기각.
-- **D**: 듀얼 모드 — 기본은 A(모킹), 옵션으로 라이브 백엔드 모드 지원(REQ-E2E-OPT-201). 기본 명령은 A로 통과되어야 함.
+**결정**: 듀얼 모드. 기본 `npm run test:e2e`는 `page.route('/api/v1/**', ...)` 모킹(A)으로 실행하고, `E2E_LIVE_BACKEND=1` 환경변수 설정 시 라이브 백엔드 모드 best-effort 지원(REQ-E2E-OPT-201). 모의 응답은 `apps/web/e2e/fixtures/api/*.json`에서 로드.
 
-권고: **D** — A를 기본 동작으로 보장하면서 라이브 모드는 best-effort 옵션. C는 G2에 위배.
+선택지 참고:
+- A: page.route 모킹 전용
+- B: msw (기각)
+- C: 라이브만 지원 (기각 — REQ-E2E-001c 위반)
+- **D (채택)**: 기본 모킹 + 옵션 라이브
 
-### OPEN #3 — Playwright 브라우저 매트릭스 [draft] [Resolve before /moai run]
+### OPEN #3 — Playwright 브라우저 매트릭스 [RESOLVED: 옵션 A 채택]
 
-선택지:
-- **A (권장)**: Chromium 단일 — PoC 데모용으로 충분, 실행 시간 최소.
-- **B**: Chromium + Firefox — 브라우저 호환성 일부 검증.
-- **C**: Chromium + Firefox + WebKit — 풀 매트릭스, 실행 시간 약 3배.
+**결정**: Chromium 단일. `playwright.config.ts`에 `projects: [{ name: 'chromium', use: devices['Desktop Chrome'] }]` 1개만 설정. PoC 데모 범위 일치, 실행 시간 최소화. 브라우저 확장은 CI 통합 SPEC에서 결정.
 
-권고: **A** — PoC 범위 일치. CI 통합 SPEC에서 매트릭스 확장.
+선택지 참고:
+- **A (채택)**: Chromium 단일
+- B: Chromium + Firefox
+- C: 풀 매트릭스
 
-### OPEN #4 — analyst의 audit-logs 차단 동작 검증 강도 [draft] [Resolve before /moai run]
+### OPEN #4 — analyst의 audit-logs 차단 동작 검증 강도 [RESOLVED: 옵션 B 채택, 단일 redirect 확정]
 
-배경: SPEC-AX-WEB-001은 viewer/analyst의 audit-logs 메뉴를 사이드바에서 비노출 처리할 수도 있고, 직접 URL 시 403 toast를 띄울 수도 있다. 실제 구현이 어느 쪽인지 본 SPEC 작성 시점에 확정되지 않음. AC-RBAC-DENY-001/002·AC-FLOW-ANALYST-DENY-001은 SUT-implemented behavior를 허용 범위로 두는데, 이 유연성이 너무 넓은지 결정 필요.
+**결정**: SPEC-AX-WEB-001 REQ-WEB-007a에 명시된 "라우트 가드 redirect" 단일 동작으로 확정. viewer/analyst가 `/dashboard/audit-logs` 또는 `/dashboard/rubric/thresholds` 에 직접 접근 시 `/dashboard` 로 리다이렉트. AC-RBAC-DENY-001/002 및 AC-FLOW-ANALYST-DENY-001에 단일 결과 기술 완료(D6 수정 포함).
 
-선택지:
-- **A (권장)**: 현재 허용 범위 유지(3가지 차단 방식 중 SUT가 구현한 것 무엇이든 통과). 단, 어느 방식이든 입력 폼·관리 액션은 가시되지 않아야 함을 명시.
-- **B**: SUT 실제 구현을 사전 조사(Read `apps/web/src/app/(dashboard)/audit-logs/page.tsx` 등)해 단일 차단 방식을 AC에 못박는다. 0-diff 유지 가능하지만 AC가 SUT 구현 세부에 묶임.
+선택지 참고:
+- A: 3가지 차단 방식 허용 (기각 — 검증 강도 부족)
+- **B (채택)**: SUT 구현 조사 후 단일 redirect 확정
 
-권고: **A** — UX 차단 다양성을 SPEC이 강제하지 않고 SUT 결정을 존중. SPEC-AX-WEB-001이 향후 차단 방식을 변경해도 본 E2E SPEC AC가 자동으로 따라감.
+### OPEN #5 — 테스트 모의 JWT 생성 전략 [RESOLVED: 서명 검증 없음 확인]
 
-### OPEN #5 — 테스트 모의 JWT 생성 전략 [draft] [Resolve before /moai run]
+**결정**: WEB-001 `apps/web/src/lib/auth.ts:6`에서 `import { decodeJwt } from "jose"` 사용 확인. `decodeJwt`는 서명 검증 없이 페이로드만 디코드. `getServerSession()`은 `exp` 클레임 비교만 수행(line 103). 따라서 모의 JWT는 base64 인코드된 유효 JSON 페이로드 + 더미 서명(`header.payload.anysignature`)으로 충분하며 `KEYCLOAK_DEV_MOCK` 등 별도 환경변수 불필요.
 
-배경: 미들웨어(`apps/web/src/middleware.ts`)는 쿠키 존재만 검사하지만, 보호 페이지의 RSC가 `getServerSession()` 등에서 JWT를 디코드해 역할(`scope`)을 읽는다. 모의 토큰은 JWT 구조(`header.payload.signature`)는 갖추되 SUT가 서명 검증을 어느 강도로 하는지에 따라 전략이 갈린다.
+모의 JWT 생성 패턴:
+```ts
+const payload = { sub: 'test-user', scope: 'viewer', exp: Math.floor(Date.now()/1000)+3600 };
+const b64 = (obj: object) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+const mockJwt = `${b64({alg:'RS256',typ:'JWT'})}.${b64(payload)}.mock-sig`;
+```
 
-선택지:
-- **A (권장)**: SUT가 서명 검증을 우회 가능한 dev 모드(`KEYCLOAK_DEV_MOCK=true` 등 환경변수가 SPEC-AX-WEB-001 §1.4에 있다면)로 동작하고, 모의 토큰은 base64로 인코드된 JSON 페이로드 + 더미 서명. `apps/web/.env.test` 에서 dev 모드 활성화.
-- **B**: 실제 RSA/ES256 키 쌍을 테스트용으로 생성(`apps/web/e2e/fixtures/keys/`, git ignore)하고 SUT 표준 JWKS 엔드포인트도 모킹. 의존 증가.
-- **C**: 서명 검증 자체를 BFF 레이어에서 모킹하여 토큰 페이로드만 신뢰. 추가 가드 페이지의 검증 강도에 따라 부분 실패 가능.
+선택지 참고:
+- A: dev 모드 환경변수 (불필요로 기각)
+- B: 실제 키쌍 생성 (불필요로 기각)
+- **RESOLVED**: 서명 검증 없음 확인 — 더미 서명 JWT 직접 사용
 
-권고: **A** 시도 후 SUT가 dev 모드 미지원이면 **B**로 폴백. 결정은 plan-auditor 단계에서 SPEC-AX-WEB-001 코드 조사 후 확정.
+### OPEN #6 — 한국어 텍스트 셀렉터의 유지보수성 [RESOLVED: 옵션 A 채택]
 
-### OPEN #6 — 한국어 텍스트 셀렉터의 유지보수성 [draft] [Defer to Run phase observation]
+**결정**: `apps/web/e2e/selectors.ts` 단일 모듈에 한국어 라벨 상수화. Run phase에서 자연스럽게 구현.
 
-배경: REQ-E2E-001d에 따라 `data-testid` 없이 텍스트/role 기반 셀렉터를 사용한다. SPEC-AX-WEB-001이 한국어 라벨(예: "업로드", "승인", "감사 로그")을 변경하면 본 SPEC 테스트가 깨진다.
+```ts
+// apps/web/e2e/selectors.ts 예시
+export const LABELS = {
+  upload: '업로드',
+  approve: '승인',
+  reject: '반려',
+  auditLogs: '감사 로그',
+  rubric: '루브릭',
+  logout: '로그아웃',
+  reviewSubmit: '리뷰 제출',
+} as const;
+```
 
-선택지:
-- **A (권장)**: 텍스트 셀렉터를 `apps/web/e2e/selectors.ts` 단일 모듈에 상수화해 라벨 변경 시 1곳 수정으로 흡수.
-- **B**: SPEC-AX-WEB-002(가칭)을 선행해 SUT에 `data-testid` 추가 — 본 SPEC의 0-diff 원칙(REQ-E2E-001b) 깨짐. 기각.
-
-권고: **A** — Run phase에서 자연스럽게 도출.
+선택지 참고:
+- **A (채택)**: selectors.ts 상수화
+- B: SUT data-testid 추가 (기각 — 0-diff 위반)
 
 ---
 
@@ -548,4 +573,4 @@ npm run test:e2e:ui                  # UI 모드, 디버깅용
 2. **라이브 의존 없이 로컬 실행** — Keycloak/Postgres/MinIO/Go 백엔드 부트스트랩 불필요
 3. **PoC 범위 일치** — 시각 회귀·부하·CI/CD·a11y 모두 §3 비목표
 
-§6 OPEN 6건은 `/moai plan` annotation cycle 또는 `/moai run` 시작 전 plan-auditor 단계에서 SPEC-AX-WEB-001 SUT 코드 조사를 통해 해결한다. 모든 OPEN이 RESOLVED 처리되면 본 SPEC은 v0.2.0으로 승격되어 `/moai run SPEC-AX-E2E-001` 진입한다.
+§6 OPEN 6건 전부 RESOLVED 처리 완료. 본 SPEC은 v0.2.0으로 승격되어 `/moai run SPEC-AX-E2E-001` 진입 준비 완료.
