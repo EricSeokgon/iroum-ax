@@ -10,7 +10,9 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "next": "14.2.18",
@@ -37,7 +39,8 @@
     "autoprefixer": "10.4.20",
     "eslint": "8.57.0",
     "eslint-config-next": "14.2.18",
-    "vitest": "2.1.5"
+    "vitest": "2.1.5",
+    "@playwright/test": "^1.49.0"
   },
   "engines": {
     "node": ">=20.0.0"

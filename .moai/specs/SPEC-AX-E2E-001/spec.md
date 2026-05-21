@@ -1,6 +1,6 @@
 ---
 id: SPEC-AX-E2E-001
-version: 0.3.0
+version: 0.4.0
 status: draft
 created: 2026-05-21
 updated: 2026-05-21
@@ -11,6 +11,7 @@ issue_number: 0
 
 # HISTORY
 
+- 0.4.0 (2026-05-21): SUT 직접 검증으로 AC 3건 정정. AC-RBAC-DENY-001/002/AC-FLOW-ANALYST-DENY-001: 리다이렉트 대신 인-페이지 "권한이 없습니다. 관리자만 접근할 수 있습니다." 텍스트 표시(URL 유지)로 수정. 근거: `apps/web/src/app/(dashboard)/audit-logs/page.tsx:3` 코멘트 ("비-admin 접근 시 in-page error 표시 (redirect 대신, URL 유지)") + 동일 페이지 line 30-45 `if (session.role !== "admin") return <인-페이지 차단 JSX>;`. AC-AUTH-003: 만료 쿠키 흐름이 middleware는 통과(cookie 존재 여부만 검사)하고 `apps/web/src/app/(dashboard)/layout.tsx:17-20` `getServerSession()` null 검출 시 `redirect("/login")` 호출(no `?from=` param). 따라서 from 파라미터 없는 `/login` 단순 어설션으로 수정.
 - 0.3.0 (2026-05-21): SUT 직접 검증으로 phantom-path 2건 추가 정정. plan-auditor D1/D3이 BFF API 경로(`/api/v1/evidences`, `/api/v1/rubric/thresholds`)와 페이지 라우트를 혼동. 페이지 라우트: `/dashboard/evidences` → `/dashboard/evidence`(단수, SUT 일치), `/dashboard/rubric/thresholds` → `/dashboard/rubric`(SUT 일치). BFF API 경로는 이미 정확하므로 유지.
 - 0.2.0 (2026-05-21): plan-auditor CONDITIONAL PASS → PASS 전환(오버 교정 포함). D1(BLOCKER) `/dashboard/evidence` → `/dashboard/evidences` 변경(0.3.0에서 복원), D3 `/dashboard/rubric` → `/dashboard/rubric/thresholds` 변경(0.3.0에서 복원), D4 AC-VIS-ALL-001/002 신규 추가, D5 AC-AUTH-003 단일 결과로 확정, D6 AC-RBAC-DENY-001/002 단일 redirect 결과로 확정, D7 AC-FLOW-ANALYST-002 진입점 수정, D8 AC 수 24건으로 정정. OPEN #1~#6 전부 RESOLVED 처리.
 - 0.1.0 (2026-05-21): SPEC-AX-WEB-001(merged, Next.js 14+ 대시보드, 7 화면, BFF + HttpOnly 쿠키)의 **Playwright E2E 자동화** 첫 초안. 본 SPEC은 `apps/web/`의 골든 패스(인증 흐름·역할별 권한·로그아웃)를 브라우저-레벨에서 검증하는 테스트 슈트를 신규 디렉터리 `apps/web/e2e/`에 추가한다. SUT는 SPEC-AX-WEB-001이 빌드한 Next.js 앱이며, 백엔드 Go control-plane(`apps/control-plane/`) 및 SPEC-AX-WEB-001 앱 소스(`apps/web/src/**`)는 [HARD] 0-diff(consumer-only). Keycloak 24.x 의존 회피를 위해 OIDC 콜백을 Playwright `page.route` 인터셉트로 모킹하고, 역할별 cookie `storageState` fixture로 세션을 주입한다. 시각 회귀·부하·CI/CD 파이프라인 통합은 §3 비목표(별도 SPEC). (작성자: ircp)
@@ -222,7 +223,7 @@ phantom path 0건 [HARD]: 본 SPEC `apps/web/e2e/`에서 참조하는 모든 URL
 - **AC-AUTH-003 — 만료 쿠키 시 재로그인 유도**
   - **Given** `ax_access_token` 쿠키 값이 만료된 JWT 페이로드를 담고 있다 (`exp` 클레임이 현재 시각 이하)
   - **When** `/dashboard/evidence` 로 이동한다
-  - **Then** `getServerSession()`이 null을 반환하고 미들웨어가 `/login?from=%2Fdashboard%2Fevidence` 로 리다이렉트한다 (단일 결과 — `/api/auth/refresh` 호출 없음; `apps/web/src/lib/auth.ts:103`에서 만료 시 null 반환 확인됨)
+  - **Then** middleware는 cookie 존재 여부만 확인하므로 만료 쿠키도 통과시키고(`apps/web/src/middleware.ts:13` 코멘트 "만료된 토큰도 통과시키되..."), `apps/web/src/app/(dashboard)/layout.tsx:17-20`이 `getServerSession()`의 null 반환을 감지하여 `redirect("/login")` 을 호출한다(from 파라미터 없음). 최종 URL pathname이 `/login` 이 된다 — `?from=` 쿼리 파라미터는 부착되지 않음.
 
 ### 5.2 그룹 B — viewer RBAC (rbac-viewer.spec.ts)
 
@@ -254,10 +255,10 @@ phantom path 0건 [HARD]: 본 SPEC `apps/web/e2e/`에서 참조하는 모든 URL
 - **AC-RBAC-DENY-001 — viewer의 감사 로그 직접 URL 접근 차단**
   - **Given** Playwright 세션이 `viewer` storageState로 로드되었다
   - **When** `/dashboard/audit-logs` 로 직접 URL 이동한다
-  - **Then** `/dashboard` 로 리다이렉트된다 (SPEC-AX-WEB-001 REQ-WEB-007a 라우트 가드 단일 동작)
+  - **Then** 인-페이지에 `권한이 없습니다. 관리자만 접근할 수 있습니다.` 텍스트가 가시되며 URL은 `/dashboard/audit-logs` 를 유지한다 (redirect 없음 — SUT comment `apps/web/src/app/(dashboard)/audit-logs/page.tsx:3` "비-admin 접근 시 in-page error 표시 (redirect 대신, URL 유지)")
 
 - **AC-RBAC-DENY-002 — viewer의 루브릭 페이지 차단**
-  - AC-RBAC-DENY-001과 동일 패턴, 대상은 `/dashboard/rubric` — `/dashboard` 로 리다이렉트
+  - AC-RBAC-DENY-001과 동일 패턴, 대상은 `/dashboard/rubric` — 인-페이지 `권한이 없습니다. 관리자만 접근할 수 있습니다.` 텍스트 표시, URL `/dashboard/rubric` 유지 (redirect 없음)
 
 ### 5.3 그룹 C — analyst 흐름 (flow-analyst.spec.ts)
 
@@ -277,7 +278,7 @@ phantom path 0건 [HARD]: 본 SPEC `apps/web/e2e/`에서 참조하는 모든 URL
   - **Then** `POST /api/v1/reviews` 요청이 발생하고, 응답 상태가 4-state machine 의 `SUBMITTED`(SPEC-AX-REVIEW-001 정의)로 반영된다
 
 - **AC-FLOW-ANALYST-DENY-001 — analyst의 audit-logs 차단**
-  - AC-RBAC-DENY-001과 동일 패턴, viewer 자리에 analyst — analyst도 audit-logs 접근 차단이 SPEC-AX-AUDIT-QUERY-001 admin-only narrowing에 의해 강제됨
+  - AC-RBAC-DENY-001과 동일 패턴(인-페이지 차단, redirect 없음), viewer 자리에 analyst — analyst가 `/dashboard/audit-logs` 로 직접 이동 시 인-페이지 `권한이 없습니다. 관리자만 접근할 수 있습니다.` 텍스트가 표시되고 URL은 `/dashboard/audit-logs` 를 유지함. SPEC-AX-AUDIT-QUERY-001 admin-only narrowing이 백엔드에서도 강제하지만 UI 레벨에서 먼저 차단.
 
 ### 5.4 그룹 D — admin 흐름 (flow-admin.spec.ts)
 

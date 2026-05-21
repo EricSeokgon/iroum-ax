@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "id": "ei-001",
+      "name": "경영목표 달성도",
+      "category": "경영성과",
+      "weight": 0.3,
+      "parent_id": null
+    },
+    {
+      "id": "ei-002",
+      "name": "재무건전성",
+      "category": "재무",
+      "weight": 0.25,
+      "parent_id": null
+    }
+  ],
+  "total": 2
+}
