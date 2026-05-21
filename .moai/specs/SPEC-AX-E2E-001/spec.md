@@ -1,7 +1,7 @@
 ---
 id: SPEC-AX-E2E-001
 version: 0.4.0
-status: draft
+status: implemented
 created: 2026-05-21
 updated: 2026-05-21
 author: ircp

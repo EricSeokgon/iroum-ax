@@ -7,6 +7,17 @@
 
 ## [Unreleased] - 2026-05-21
 
+### Added — SPEC-AX-E2E-001 v0.4.0 (Playwright E2E 테스트 슈트)
+
+- **21개 Playwright E2E 테스트 케이스** (`apps/web/e2e/`, 5개 spec 파일): `auth.spec.ts`(인증 흐름 5건) · `rbac-viewer.spec.ts`(Viewer 권한 제한 5건) · `flow-analyst.spec.ts`(Analyst 골든패스 4건) · `flow-admin.spec.ts`(Admin 골든패스 4건) · `logout.spec.ts`(로그아웃 3건). `npx playwright test --list` 21 tests discovered PASS.
+- **역할별 Mock JWT storageState 픽스처** (`e2e/global-setup.ts`, `e2e/fixtures/auth.ts`): Keycloak 의존 없이 viewer/analyst/admin 역할별 `ax_access_token` HttpOnly 쿠키 직접 주입. `decodeJwt(jose)` 서명 미검증 특성 활용. `e2e/.auth/{viewer,analyst,admin}.json` storageState 사전 생성.
+- **BFF API 이중 모드 목** (`e2e/fixtures/api-mocks.ts`): `E2E_LIVE_BACKEND=1` 시 실제 BFF 통과, 미설정 시 `page.route` 7개 도메인 JSON fixture 자동 인터셉트. 6개 fixture 파일(`e2e/fixtures/api/*.json`): evidences · evaluation-items · scores · reviews · audit-logs · rubric-thresholds.
+- **한국어 텍스트 셀렉터** (`e2e/selectors.ts`): SUT 실제 DOM 텍스트 기반 셀렉터 상수. SUT 텍스트 변경 시 단일 파일만 수정.
+- **기지 차단(pre-existing SUT 결함)**: `apps/web/next.config.ts` + Next.js 14.2.18 비호환(`loadConfig`가 `.ts` 설정 거부) → `npm run dev` 미기동 → `npm run test:e2e` 실행 불가. 구조 검증(`--list` PASS) 및 0-diff는 완료. 실행 차단 해소는 **SPEC-AX-WEB-003** 별도 처리 예정.
+- **consumer-only 0-diff [HARD]**: `apps/control-plane/` · `apps/web/src/` · `pipelines/` 무변경.
+
+---
+
 ### Added — SPEC-AX-WEB-001 v0.1.0 (PoC 데모 웹 대시보드 프런트엔드)
 
 - **Next.js 14+ App Router 워크스페이스** (`apps/web/`): TypeScript 5.4+ strict 모드, shadcn/ui + Tailwind CSS 3.4+, TanStack Query v5. 루트 `package.json` `workspaces: ["apps/web"]` 갱신.

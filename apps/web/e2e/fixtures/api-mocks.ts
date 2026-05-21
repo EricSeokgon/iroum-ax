@@ -25,6 +25,9 @@ function loadFixture<T>(name: string): T {
  *
  * 재정의 필요 시 본 호출 후 더 좁은 page.route 를 추가하면 우선순위 적용.
  */
+// @MX:ANCHOR: [AUTO] mockBffApis — BFF API 목 진입점. 5개 spec 파일(auth/rbac-viewer/flow-analyst/flow-admin/logout)에서 호출(fan_in=5).
+// @MX:REASON: fan_in=5 ≥ 3 임계값 초과. 이 함수 서명·동작 변경 시 5개 spec 파일 전부 영향.
+// @MX:SPEC: SPEC-AX-E2E-001
 export async function mockBffApis(page: Page): Promise<void> {
   const evidences = loadFixture("evidences.json");
   const evaluationItems = loadFixture("evaluation-items.json");

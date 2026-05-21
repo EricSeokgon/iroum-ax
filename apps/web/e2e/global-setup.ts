@@ -66,6 +66,8 @@ async function createStorageState(
   }
 }
 
+// @MX:NOTE: [AUTO] globalSetup — Playwright 글로벌 설정. viewer/analyst/admin storageState 생성 후 e2e/.auth/에 저장.
+// @MX:SPEC: SPEC-AX-E2E-001
 export default async function globalSetup(config: FullConfig): Promise<void> {
   if (!fs.existsSync(AUTH_DIR)) {
     fs.mkdirSync(AUTH_DIR, { recursive: true });
