@@ -1,7 +1,7 @@
 ---
 id: SPEC-AX-PIPE-001
-version: 0.1.2
-status: draft
+version: 0.1.0
+status: complete
 created: 2026-05-21
 updated: 2026-05-21
 author: ircp
