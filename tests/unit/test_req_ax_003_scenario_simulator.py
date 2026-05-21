@@ -109,3 +109,35 @@ class TestScenarioSimulatorBtoA:
         assert result.current_grade == "B", (
             f"current_grade가 'B'여야 하나 '{result.current_grade}' 반환됨"
         )
+
+
+# =============================================================================
+# 엣지 케이스 — 커버리지 보완 (lines 77, 94, 145)
+# =============================================================================
+
+
+class TestScenarioSimulatorEdgeCases:
+    """ScenarioSimulator 엣지 케이스 — 커버리지 보완."""
+
+    def test_get_predictor_raises_when_none(self) -> None:
+        """predictor=None일 때 _get_predictor()는 RuntimeError를 발생시킨다."""
+        simulator = ScenarioSimulator()
+        simulator.predictor = None
+        with pytest.raises(RuntimeError, match="GradePredictor"):
+            simulator._get_predictor()
+
+    def test_default_content_changes_non_a_grade(self) -> None:
+        """A 이외의 등급에 대한 기본 콘텐츠 변경 제안을 반환한다."""
+        simulator = ScenarioSimulator()
+        result = simulator._default_content_changes("B")
+        assert len(result) >= 1
+        assert "B" in result[0]
+
+    def test_generate_content_changes_with_none_classifier(self) -> None:
+        """classifier가 None이면 default_content_changes로 fallback."""
+        simulator = ScenarioSimulator()
+        mock_pred = MagicMock()
+        mock_pred.classifier = None  # 조기 반환 트리거 (line 94)
+        mock_pred.vectorizer = MagicMock()
+        result = simulator._generate_content_changes(mock_pred, "A")
+        assert len(result) >= 1
