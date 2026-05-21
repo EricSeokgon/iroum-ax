@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 _CALLBACK_TIMEOUT_SECONDS: float = 5.0
 
 
+# @MX:ANCHOR: [AUTO] post_callback — Go Control Plane 콜백 HTTP 진입점 (fan_in >= 3)
+# @MX:REASON: ingestion_worker + 6 단위 테스트가 이 함수를 직접 소비 (SPEC-AX-INTEG-001)
+# @MX:SPEC: SPEC-AX-INTEG-001 REQ-INTEG-002 / REQ-INTEG-003
 def post_callback(
     *,
     base_url: str,

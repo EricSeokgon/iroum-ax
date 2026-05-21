@@ -17,6 +17,8 @@ from pipelines.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# @MX:NOTE: [AUTO] TASK_NAME — Kombu envelope headers.task와 정확 일치 필수 (마법 상수)
+# @MX:SPEC: SPEC-AX-INTEG-001 REQ-INTEG-001 (Go dispatcher도 동일 문자열 사용 — 양쪽 동시 변경)
 # REQ-INTEG-001 — Celery task name 고정 (envelope headers.task와 정확 일치 필수)
 # Go dispatcher가 이 문자열을 사용하므로 변경 시 양쪽 동시 수정 필요.
 TASK_NAME: str = "pipelines.workers.ingestion_worker.run"

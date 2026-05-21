@@ -2,7 +2,7 @@
 id: SPEC-AX-INTEG-001
 title: Python↔Go 통합 — Celery 워크플로우 트리거 및 REST 콜백
 version: 0.1.0
-status: draft
+status: completed
 created: 2026-05-21
 updated: 2026-05-21
 author: ircp
@@ -13,6 +13,7 @@ parent_specs: [SPEC-AX-CTRL-001, SPEC-AX-PIPE-001, SPEC-AX-SERVER-001]
 
 ## HISTORY
 
+- 2026-05-21 v0.1.0 SYNC: TRUST 5 PASS 0.912 / evaluator-active iter2 PASS 0.912. Go 14 단위 테스트 GREEN (workflow_callback_handler.go). Python 26 단위 테스트 GREEN (startup/validation 14 + callback 6 + Kombu envelope 6). 신규 6 파일 (workflow_callback_handler.go / control_plane.py / ingestion_worker.py / celery_client.py + settings.py 수정 + server.go 수정). consumer-only [HARD] 0-diff (auth/rbac/schema/go.mod 무변경). 구현 커밋: 2ab34c9, 브랜치: feature/SPEC-AX-INTEG-001-integration.
 - 2026-05-21: 초안 작성 (v0.1.0). research.md(2026-05-21) 기반 EARS 8 REQ + 8 AC 정의. Celery + REST callback 패턴 채택 (SPEC-AX-CTRL-001 REQ-CTRL-005 강제 준수).
 
 ---

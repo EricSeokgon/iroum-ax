@@ -7,6 +7,22 @@
 
 ## [Unreleased] - 2026-05-21
 
+### Added — SPEC-AX-INTEG-001 v0.1.0 (Python↔Go 통합 — Celery 워크플로우 트리거 및 REST 콜백)
+
+- **Go callback handler** (`apps/control-plane/cmd/server/workflow_callback_handler.go`, 275 LOC): `POST /api/v1/workflows/{id}/callback` — RUNNING→COMPLETED|FAILED 상태 전이(단일 TX: GetWorkflow FOR UPDATE + UpdateWorkflowState + UpdateWorkflowResult + InsertAuditLog). 204 성공 / 400 잘못된 본문 또는 상태 / 404 워크플로우 없음 / 409 비-RUNNING 상태(terminal state 거부). audit user_id='cli-anonymous'(REQ-UBI-003). 한국어 에러 메시지(REQ-UBI-002).
+- **server.go 마운트**: `callbackH *WorkflowCallbackHandler` 필드 추가 + `/api/v1/workflows/` 마운트. Go 14 단위 테스트 PASS.
+- **Python Celery worker** (`pipelines/workers/ingestion_worker.py`, 107 LOC): Celery task `pipelines.workers.ingestion_worker.run` — Kombu v2 엔벨로프 수신, 스텁 처리, callback POST 전송. 부팅 시 `validate_worker_environment_from_env()` 환경변수 검증.
+- **callback 클라이언트** (`pipelines/callbacks/control_plane.py`, 119 LOC): `post_callback()` fire-and-forget HTTP POST via httpx. 2xx 성공 / 3xx 차단 / 4xx/5xx 경고 로깅. 콜백 실패 시 Celery 태스크 상태에 영향 없음(fire-and-forget).
+- **Celery 앱 초기화** (`pipelines/config/celery_client.py`, 98 LOC): `validate_worker_environment()` + `create_celery_app()`. `GO_CONTROL_PLANE_URL` 빈값 시 Celery worker 시작 거부(REQ-INTEG-006).
+- **settings.py 확장**: `go_control_plane_url` 필드(기본값="", fail-fast 검증). `vlm_endpoint` validation_alias VLLM_ENDPOINT 수정.
+- **신규 환경변수**: `GO_CONTROL_PLANE_URL`(Go 콜백 URL, 미설정 시 worker 시작 거부) · `VLLM_ENDPOINT`(vLLM 엔드포인트 localhost/127.0.0.1/::1 허용 목록).
+- **보안 제약 준수**: REQ-UBI-001(외부 LLM 차단 — VLLM_ENDPOINT localhost-only 허용 목록) · REQ-UBI-002(한국어 에러 메시지) · REQ-UBI-003(audit_log user_id='cli-anonymous').
+- **Python 테스트**: 26 단위 테스트(startup/validation 14 + callback 복원력 6 + Kombu 엔벨로프 6) PASS.
+- **consumer-only 0-diff [HARD]**: `internal/auth`·`internal/store`·`internal/errors`·`rbac.go`·schema·go.mod 무변경.
+- **evaluator-active**: TRUST 5 PASS 0.912 (iter-2). 4-차원: Functionality / Security / Craft / Consistency.
+
+---
+
 ### Added — SPEC-AX-E2E-001 v0.4.0 (Playwright E2E 테스트 슈트)
 
 - **21개 Playwright E2E 테스트 케이스** (`apps/web/e2e/`, 5개 spec 파일): `auth.spec.ts`(인증 흐름 5건) · `rbac-viewer.spec.ts`(Viewer 권한 제한 5건) · `flow-analyst.spec.ts`(Analyst 골든패스 4건) · `flow-admin.spec.ts`(Admin 골든패스 4건) · `logout.spec.ts`(로그아웃 3건). `npx playwright test --list` 21 tests discovered PASS.
