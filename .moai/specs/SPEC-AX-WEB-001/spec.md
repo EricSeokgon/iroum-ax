@@ -1,9 +1,10 @@
 ---
 id: SPEC-AX-WEB-001
-version: 0.1.1
-status: draft
+version: 0.2.0
+status: complete
 created: 2026-05-21
 updated: 2026-05-21
+completed: 2026-05-21
 author: ircp
 priority: high
 issue_number: 0
@@ -11,6 +12,7 @@ issue_number: 0
 
 # HISTORY
 
+- 0.2.0 (2026-05-21): SYNC COMPLETE — 6 Phase 구현 완료, status draft → complete. Phase A(인증/BFF/scaffold 35파일) + Phase B(증빙 7파일) + Phase C(평가항목+점수 13파일) + Phase D(리포트 6파일) + Phase E(리뷰 11파일) + Phase F(감사로그+루브릭 10파일) + sidebar 경로 수정. 총 71개 파일 신규. 모든 AC GREEN. 백엔드 0-diff [HARD] 준수.
 - 0.1.1 (2026-05-21): plan-auditor CONDITIONAL PASS 0.77 후 annotation 결정 반영. OPEN #1 RESOLVED: `workspaces: ["apps/web"]` 대체(A). OPEN #2 RESOLVED: `realm-export.json` 수정 허용(백엔드 0-diff 예외 명시). OPEN #3 RESOLVED: HttpOnly 쿠키 BFF 방식 채택(선택지 A — Next.js Route Handler BFF). 누락 AC 4건 추가(AC-052, AC-073, AC-074 + 로그아웃 AC). §10 Affected Files 갱신.
 - 0.1.0 (2026-05-21): PoC 데모용 웹 대시보드 프런트엔드(Web Dashboard Frontend) 첫 초안. 15 SPEC 완료된 Go control-plane(`apps/control-plane/`, gRPC :50051 + REST :8080)이 노출한 `/api/v1/*` 엔드포인트(AUTH/EVIDENCE/EVAL-ITEM/SCORE/REPORT/REVIEW/RUBRIC/AUDIT-QUERY)를 한국 공공 기관(KEPCO E&C) 평가자(analyst)·열람자(viewer)·관리자(admin) 3-역할(SPEC-AX-AUTH-001 RBAC 정합)에게 노출하는 **PoC 데모 5-스크린 Next.js 14+ App Router 프런트엔드**를 신규 디렉터리 `apps/web/`에 추가한다. 핵심 화면 5개: (1) 로그인(Keycloak OIDC redirect), (2) 증빙 업로드·목록, (3) 평가 항목 트리 + 점수 입력, (4) 범주 리포트 뷰, (5) 리뷰 워크플로(Kanban). admin 전용 감사 로그 뷰어(7번째). 인증은 Keycloak 24.x SSO/JWT(`iroum-ax:{admin,analyst,viewer}` scope) 위임, 토큰 자동 갱신 투과. **본 SPEC은 Go control-plane API의 순수 consumer이며 어떤 백엔드 코드·schema·API 계약도 변경하지 않는다 — 백엔드 0-diff(HARD)**. 신규 워크스페이스(`apps/web/`) 추가, 루트 `package.json` `workspaces` 필드 확장 1줄(Open #1로 확정), 어떤 백엔드 Go 파일도 수정 0. WebSocket 실시간 알림, Excel/HWP 임포트 UI, 다국어(한국어 외), 모바일 반응형, CI/CD 파이프라인은 §3 비목표에서 의도적 제외. (작성자: ircp)
 

@@ -6,7 +6,7 @@
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](pyproject.toml)
 [![Go](https://img.shields.io/badge/go-1.22-00ADD8.svg)](go.mod)
 [![Tests](https://img.shields.io/badge/tests-490+_passing-brightgreen.svg)](#)
-[![SPEC](https://img.shields.io/badge/SPECs-9_GREEN-purple.svg)](#)
+[![SPEC](https://img.shields.io/badge/SPECs-16_GREEN-purple.svg)](#)
 [![Security](https://img.shields.io/badge/Algorithm_Confusion_Attack-Defended-blue.svg)](#)
 
 > 한국 공공기관 경영평가 보고서 자동화 AI 플랫폼 — KEPCO E&C anchor
@@ -21,7 +21,7 @@ KEPCO E&C anchor 고객 대상 경영평가 자동화 플랫폼. HWP 문서 수�
 
 ## 프로젝트 상태
 
-**Walking Skeleton + Auth + Observability + ABAC + 증빙 관리 + 평가항목 taxonomy 완료** (Sprint 0-7 + OBS + AUTH-003 + EVID-001 + EVAL-ITEM-001, 2026-05-18)
+**Walking Skeleton + Auth + Observability + ABAC + 증빙 관리 + 평가항목 taxonomy + 점수/리포트/리뷰/루브릭/감사 + 웹 대시보드 완료** (Sprint 0-7 + 16 SPEC GREEN, 2026-05-21)
 
 **Python 파이프라인** (SPEC-AX-001 v0.1.2)
 - 192개 단위 테스트 통과 (83% 커버리지)
@@ -86,9 +86,16 @@ KEPCO E&C anchor 고객 대상 경영평가 자동화 플랫폼. HWP 문서 수�
 - **HTTP 엔드포인트 없음** (store/audit 계층 Walking Skeleton 전용); `eval_item.go` 커버리지 86.2%
 - evaluator-active PASS (Func 96 / Sec 95 / Craft 82 / Cons 97); plan-auditor PASS 0.955; 22 AC GREEN
 
+**Next.js 웹 대시보드** (SPEC-AX-WEB-001 v0.1.0)
+- 5개 데모 화면 + admin 전용 2개 화면 (증빙·평가항목/점수·리포트·리뷰·감사로그·루브릭)
+- Keycloak 24.x SSO + PKCE/S256 + HttpOnly 쿠키 BFF — XSS 방어, 토큰 자동 갱신
+- viewer/analyst/admin 3-역할 RBAC UI 가시성 제어 (`RoleGate` + Edge 미들웨어)
+- 31 REST 엔드포인트 순수 consumer (백엔드 0-diff [HARD])
+- 총 7개 커밋, 82+ 신규 파일 (`apps/web/` 신규 워크스페이스)
+
 **품질**
 - TRUST 5 PASS (모든 5가지 차원): Tested ✓ | Readable ✓ | Unified ✓ | Secured ✓ | Trackable ✓
-- 9개 SPEC 통합 완료 (AX-001 + CTRL-001 + AUTH-001 + AUTH-002 + SERVER-001 + OBS-001 + AUTH-003 + EVID-001 + EVAL-ITEM-001)
+- 16개 SPEC 통합 완료 (AX-001 + CTRL-001 + AUTH-001 + AUTH-002 + SERVER-001 + OBS-001 + AUTH-003 + EVID-001 + EVAL-ITEM-001 + SCORE-001 + SCORE-API-001 + REPORT-001 + REVIEW-001 + RUBRIC-001 + AUDIT-QUERY-001 + WEB-001)
 
 ---
 
@@ -159,12 +166,58 @@ go run cmd/server/main.go
 ```
 iroum-ax/
 ├── apps/control-plane/   # Go — 워크플로우 오케스트레이터 (gRPC:50051, REST:8080)
+├── apps/web/             # Next.js 14+ — PoC 데모 웹 대시보드 (localhost:3000)
 ├── pipelines/            # Python — VLM/RAG/Document AI (FastAPI:8000, Celery)
 ├── schemas/              # Protobuf + OpenAPI 계약 정의
-├── deployments/helm/     # Helm Chart 스켈레톤 (K8s 배포)
+├── deployments/          # Helm Chart + Keycloak realm-export.json
 ├── tests/                # pytest 통합 테스트 (testcontainers)
-└── .moai/specs/          # SPEC 문서 (SPEC-AX-001~)
+└── .moai/specs/          # SPEC 문서 (SPEC-AX-001~WEB-001, 16개 GREEN)
 ```
+
+---
+
+## 웹 대시보드 (SPEC-AX-WEB-001)
+
+PoC 데모용 Next.js 14+ App Router 웹 대시보드. Go control-plane REST API의 순수 consumer.
+
+### 데모 화면
+
+| 화면 | 경로 | 허용 역할 |
+|------|------|-----------|
+| 로그인 | `/login` | 전체 |
+| 증빙 업로드/목록 | `/dashboard/evidences` | viewer(읽기) / analyst+admin(업로드) |
+| 평가항목 트리 + 점수 입력 | `/dashboard/evaluation-items` | viewer(읽기) / analyst+admin(입력) |
+| 범주 리포트 | `/dashboard/reports/{categoryId}` | 전체 |
+| 리뷰 Kanban 보드 | `/dashboard/reviews` | viewer(읽기) / analyst+admin(제출) / admin(승인/반려) |
+| 감사 로그 | `/dashboard/audit-logs` | admin 전용 |
+| 루브릭 임계값 | `/dashboard/rubric/thresholds` | admin 전용 |
+
+### 웹 대시보드 시작
+
+```bash
+# 1. Go control-plane 실행 (필수 선행)
+cd apps/control-plane && go run cmd/server/main.go
+# REST API: http://localhost:8080
+
+# 2. Keycloak 실행 (Docker Compose)
+docker compose -f deployments/docker-compose.yml up keycloak
+
+# 3. 웹 대시보드 실행
+cd apps/web && npm install && npm run dev
+# 웹 UI: http://localhost:3000
+```
+
+### 웹 기술 스택
+
+| 영역 | 선택 |
+|------|------|
+| 프레임워크 | Next.js 14+ (App Router, React Server Components) |
+| 언어 | TypeScript 5.4+ (strict mode) |
+| UI 키트 | shadcn/ui + Tailwind CSS 3.4+ |
+| 데이터 패칭 | TanStack Query v5 |
+| 인증 | Keycloak 24.x OIDC + PKCE/S256 + HttpOnly 쿠키 BFF |
+| 아이콘 | lucide-react |
+| 테스트 | Vitest + React Testing Library |
 
 ---
 
@@ -205,11 +258,20 @@ make docker-build # Docker 이미지 빌드
 
 ## 다음 단계 (후속 SPEC)
 
+### 웹 대시보드 확장
+
+| SPEC 후보 | 범위 |
+|-----------|------|
+| SPEC-AX-WEB-002 | Playwright e2e 자동화 + WCAG 2.1 AA 접근성 감사 |
+| SPEC-AX-WEB-003 | WebSocket 실시간 알림 (리뷰 상태 변경 푸시) |
+| SPEC-AX-WEB-004 | 다국어/i18n (영어 + 일본어) |
+| SPEC-AX-WEB-005 | HWP/Excel 임포트 UI |
+| SPEC-AX-OPS-001 | Docker 컨테이너화 + CI/CD 파이프라인 |
+
+### 플랫폼 확장
+
 | Sprint | SPEC 후보 | 범위 |
 |--------|-----------|------|
-| 7 | SPEC-AX-CTRL-001 | Go Control Plane 구현 (gRPC/REST 서버) |
-| 8 | SPEC-AX-E2E-001 | 통합 테스트 (Helm 배포 후 validation) |
-| 9 | SPEC-AX-COV-001 | 커버리지 82% → 85% |
 | - | SPEC-AX-EXPANDED-001 | 다중 평가항목 (안전보건 → 500개 전체) |
 | Phase 3 | SPEC-AX-{ESG,AUDIT,LICENSE}-001 | 인접 도메인 확장 |
 | Phase 4+ | SPEC-AX-FINTECH-001 | 금융권 규제 보고서 (조건: 공공 anchor 성공 3+ 확보) |

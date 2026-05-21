@@ -5,6 +5,24 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)을 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/lang/ko/)을 준수합니다.
 
+## [Unreleased] - 2026-05-21
+
+### Added — SPEC-AX-WEB-001 v0.1.0 (PoC 데모 웹 대시보드 프런트엔드)
+
+- **Next.js 14+ App Router 워크스페이스** (`apps/web/`): TypeScript 5.4+ strict 모드, shadcn/ui + Tailwind CSS 3.4+, TanStack Query v5. 루트 `package.json` `workspaces: ["apps/web"]` 갱신.
+- **BFF HttpOnly 쿠키 인증 레이어** (Phase A, `app/api/auth/[...]/route.ts` 4개 Route Handler): Keycloak 24.x PKCE/S256 OIDC 콜백 처리, 토큰 교환(`POST /api/v1/auth/token`), 자동 갱신(`POST /api/v1/auth/refresh`), 로그아웃(`POST /api/v1/auth/logout`), me 엔드포인트. `ax_access_token`·`ax_refresh_token` HttpOnly·Secure·SameSite=Lax 쿠키에 저장 — 클라이언트 JS 토큰 직접 접근 불가(XSS 방어).
+- **Edge 미들웨어 라우트 가드** (`middleware.ts`): `/dashboard/**` 미인증 접근 시 `/login` 리다이렉트. `RoleGate` 컴포넌트로 viewer/analyst/admin RBAC 조건부 렌더링. `Sidebar` 7개 네비게이션 항목 역할별 가시성 제어.
+- **Keycloak realm-export.json 갱신** (`deployments/keycloak/realm-export.json`): OIDC Public Client(`iroum-ax-web`) 추가 — PKCE, redirect URI `http://localhost:3000/api/auth/callback` (백엔드 0-diff 예외, OPEN #2 RESOLVED).
+- **증빙 관리 UI** (Phase B, 7파일): `GET /api/v1/evidences` 목록(pagination), `POST /api/v1/evidences` multipart 업로드 프록시(100MB 클라이언트 가드), `GET /api/v1/evidences/{id}` 상세. 드래그-드롭 업로드 드롭존(analyst/admin 한정), 페이지네이션 목록, 상세 모달.
+- **평가항목 트리 + 점수 입력 UI** (Phase C, 13파일): `parent_id` 기반 플랫→트리 클라이언트 재구성(고아 항목 fail-soft 승격), code 자연 정렬. 2-패널 레이아웃(접이식 트리 좌 + 상세/점수입력 폼 우). 점수 입력/수정 폼 RoleGate analyst/admin 한정. BFF: 평가항목 목록/상세, 점수 목록/생성/상세/수정.
+- **범주 리포트 뷰** (Phase D, 6파일): `GET /api/v1/reports/category/{id}` 프록시. 범주 선택 드롭다운, 등급 배지(A→E, 초록→빨강). SSR 초기 범주 목록 로드.
+- **리뷰 워크플로 Kanban 보드** (Phase E, 11파일): CSS-only 4-컬럼 Kanban(SUBMITTED/UNDER_REVIEW/APPROVED/REJECTED). 리뷰 제출(analyst/admin), 리뷰어 배정·승인·반려(admin) 인라인 폼. terminal 상태 카드 액션 버튼 비표시.
+- **감사 로그 뷰어 + 루브릭 설정** (Phase F, 10파일): 감사 로그 7개 쿼리 파라미터 허용 목록 + 페이지네이션. 루브릭 임계값 인라인 편집 + 신규 생성. `[scope]` 경로 순회 가드(`^[A-Za-z0-9:_-]{1,64}$` 정규식). Admin 전용 RSC 가드(역할 검사 렌더링 전 차단).
+- **공통 횡단 구현**: 한국어 정적 메시지 사전(`lib/i18n/ko.ts`), ApiError 표준화 fetch wrapper, 401 자동 refresh 1회 + 실패 시 `/login` redirect, 403 한국어 toast, 로딩 skeleton.
+- **consumer-only 0-diff [HARD]**: `apps/control-plane/**`·`go.mod`·`pyproject.toml`·`pipelines/**` 무변경. 31 endpoints 사용(phantom endpoint 0건).
+
+---
+
 ## [Unreleased] - 2026-05-20
 
 ### Added — SPEC-AX-REVIEW-001 v0.1.1 (평가 제출/승인 워크플로우 store + HTTP API 수직 슬라이스)
