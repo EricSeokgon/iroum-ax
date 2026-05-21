@@ -5,7 +5,7 @@
   "type": "module",
   "description": "iroum-ax 모노레포 루트 (TypeScript 툴링만 — Console UI는 SPEC-AX-001 제외 대상)",
   "workspaces": [
-    "apps/console"
+    "apps/web"
   ],
   "scripts": {
     "lint": "eslint .",

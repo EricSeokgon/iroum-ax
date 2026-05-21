@@ -1,0 +1,16 @@
+# 의존성
+node_modules/
+
+# Next.js 빌드 산출물
+.next/
+out/
+
+# 환경 변수
+.env*.local
+
+# 디버그
+*.log
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts

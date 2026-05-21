@@ -25,8 +25,12 @@ func main() {
 	}
 	defer logger.Sync() //nolint:errcheck
 
-	// (a) config 로드 (infallible)
-	cfg := config.Load()
+	// (a) config 로드 + 검증 (EVIDENCE_STORAGE_STRATEGY 등 fail-fast — DC-017-gap)
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		logger.Error("config 검증 실패", zap.Error(err))
+		os.Exit(1) //nolint:gocritic
+	}
 
 	// SIGTERM/SIGINT 수신 시 ctx 취소
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

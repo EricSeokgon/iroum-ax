@@ -27,6 +27,7 @@ import (
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/proto"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/scheduler"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/server"
+	"github.com/ircp/iroum-ax/apps/control-plane/internal/storage"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/store"
 	"github.com/ircp/iroum-ax/apps/control-plane/internal/workflow"
 )
@@ -50,10 +51,19 @@ type Server struct {
 	cfg            *config.Config
 	pgStore        *store.PgWorkflowStore
 	restHandler    *server.RESTHandler
-	dispatcher     *scheduler.CeleryDispatcher
-	grpcServer     *grpc.Server
-	httpServer     *http.Server
-	logger         *zap.Logger
+	evidenceH      *EvidenceHandler
+	scoreH         *ScoreHandler
+	reportH        *ReportHandler
+	// 평가 검토 핸들러 (SPEC-AX-REVIEW-001)
+	reviewH *ReviewHandler
+	// 등급 rubric 핸들러 (SPEC-AX-RUBRIC-001, cross-store 3-store 주입)
+	rubricH *RubricHandler
+	// 감사 로그 검색 핸들러 (SPEC-AX-AUDIT-QUERY-001, read-only, admin-only narrowing)
+	auditQueryH *AuditQueryHandler
+	dispatcher  *scheduler.CeleryDispatcher
+	grpcServer  *grpc.Server
+	httpServer  *http.Server
+	logger      *zap.Logger
 	// tracerShutdown — OTel TracerProvider graceful shutdown 클로저 (Sprint 2)
 	// @MX:NOTE: [AUTO] InitTracer가 반환한 shutdown 클로저 — server.shutdown() defer 체인에 등록
 	tracerShutdown func(context.Context) error
@@ -190,6 +200,29 @@ func New(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Server, 
 	restHandler := server.NewRESTHandler(workflowSvc, logger)
 	s.restHandler = restHandler
 
+	// 단계 (i-1): 증빙 핸들러 (SPEC-AX-EVID-001) — pgStore가 EvidenceStore 구현
+	// database_blob 전략: blobStore는 논리 location만 기록 (bytes는 EvidenceTx 경유)
+	s.evidenceH = NewEvidenceHandler(
+		pgStore,
+		rec,
+		storage.NewDBBlobStore(),
+		logger,
+		cfg.EvidenceMaxFileBytes,
+		cfg.EvidenceDuplicateSignalEnabled,
+	)
+
+	// 단계 (i-2): 점수 핸들러 (SPEC-AX-SCORE-API-001) — pgStore가 ScoreStore 구현
+	// consumer-only: store/audit/auth 0-diff, 자체 audit 없음 (store RecordScore* 동일 TX 전담)
+	s.scoreH = NewScoreHandler(pgStore, logger)
+	// SPEC-AX-REPORT-001: 범주 집계 리포트 핸들러 (read-only, pgStore가 ScoreStore+EvalItemStore 동시 구현)
+	s.reportH = NewReportHandler(pgStore, pgStore, logger)
+	// SPEC-AX-REVIEW-001: 평가 검토 핸들러 (cross-store 2-TX, pgStore가 ScoreReviewRequestStore+ScoreStore 동시 구현)
+	s.reviewH = NewReviewHandler(pgStore, pgStore, logger)
+	// SPEC-AX-RUBRIC-001: 등급 rubric 핸들러 (pgStore가 RubricStore+EvalItemStore+ScoreStore 동시 구현)
+	s.rubricH = NewRubricHandler(pgStore, pgStore, pgStore, logger)
+	// SPEC-AX-AUDIT-QUERY-001: 감사 로그 검색 핸들러 (read-only, admin-only narrowing, consumer-only)
+	s.auditQueryH = NewAuditQueryHandler(pgStore, logger)
+
 	return s, nil
 }
 
@@ -232,9 +265,34 @@ func (s *Server) Run(ctx context.Context) error {
 	)
 
 	// 나머지 경로: auth chain으로 wrapping
-	// recorder=nil: audit.Recorder가 auth.auditRecorder 인터페이스를 아직 구현하지 않음 (S2 TODO)
+	// SPEC-AX-AUTH-003: ABACMiddleware로 REST mux를 래핑 (BuildRESTChain 안쪽).
+	// 실행 순서 authn → authz → abac → handler가 체인 캡슐화로 자연 보장 (chain.go 무변경).
+	// recorder=nil: audit.Recorder가 auth.auditRecorder 인터페이스를 아직 구현하지 않음 (S2 TODO);
+	// REQ-ABAC-007 recorder=nil이면 ABAC 감사 기록 skip. DefaultABACPolicies는 빈 집합 → 완전 no-op.
+	abacEvaluator := auth.NewABACEvaluator(auth.DefaultABACPolicies(), nil)
+
+	// 내부 라우터: 증빙 엔드포인트(/api/v1/evidences)는 evidenceH, 나머지는 restHandler
+	// (SPEC-AX-EVID-001 GAP-01 — POST /api/v1/evidences 라우트 등록)
+	innerMux := http.NewServeMux()
+	innerMux.Handle("/api/v1/evidences", s.evidenceH.Routes())
+	innerMux.Handle("/api/v1/scores", s.scoreH.Routes())
+	innerMux.Handle("/api/v1/scores/", s.scoreH.Routes())
+	// SPEC-AX-REPORT-001: 리포트 서브트리 (Go1.22 ServeMux path-param 라우팅 구조적 필수)
+	innerMux.Handle("/api/v1/reports", s.reportH.Routes())
+	innerMux.Handle("/api/v1/reports/", s.reportH.Routes())
+	// SPEC-AX-REVIEW-001: 평가 검토 서브트리 (cross-store 2-TX + sub-resource 라우트)
+	innerMux.Handle("/api/v1/reviews", s.reviewH.Routes())
+	innerMux.Handle("/api/v1/reviews/", s.reviewH.Routes())
+	// SPEC-AX-RUBRIC-001: 등급 rubric 서브트리 (9 엔드포인트, ServeMux 최장일치 — 구체 경로 우선)
+	innerMux.Handle("/api/v1/rubrics", s.rubricH.Routes())
+	innerMux.Handle("/api/v1/rubrics/", s.rubricH.Routes())
+	// SPEC-AX-AUDIT-QUERY-001: 감사 로그 검색 서브트리 (목록 + 단건 /{id} path-param)
+	innerMux.Handle("/api/v1/audit-logs", s.auditQueryH.Routes())
+	innerMux.Handle("/api/v1/audit-logs/", s.auditQueryH.Routes())
+	innerMux.Handle("/", s.restHandler.Mux())
+
 	outerMux.Handle("/", auth.BuildRESTChain(
-		s.restHandler.Mux(),
+		auth.ABACMiddleware(abacEvaluator, s.cfg.AuthEnabled)(innerMux),
 		s.tokenValidator,
 		nil,
 		s.cfg.AuthEnabled,

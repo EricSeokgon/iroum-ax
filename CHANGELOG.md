@@ -5,7 +5,147 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)을 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/lang/ko/)을 준수합니다.
 
-## [Unreleased] - 2026-05-15
+## [Unreleased] - 2026-05-21
+
+### Added — SPEC-AX-WEB-001 v0.1.0 (PoC 데모 웹 대시보드 프런트엔드)
+
+- **Next.js 14+ App Router 워크스페이스** (`apps/web/`): TypeScript 5.4+ strict 모드, shadcn/ui + Tailwind CSS 3.4+, TanStack Query v5. 루트 `package.json` `workspaces: ["apps/web"]` 갱신.
+- **BFF HttpOnly 쿠키 인증 레이어** (Phase A, `app/api/auth/[...]/route.ts` 4개 Route Handler): Keycloak 24.x PKCE/S256 OIDC 콜백 처리, 토큰 교환(`POST /api/v1/auth/token`), 자동 갱신(`POST /api/v1/auth/refresh`), 로그아웃(`POST /api/v1/auth/logout`), me 엔드포인트. `ax_access_token`·`ax_refresh_token` HttpOnly·Secure·SameSite=Lax 쿠키에 저장 — 클라이언트 JS 토큰 직접 접근 불가(XSS 방어).
+- **Edge 미들웨어 라우트 가드** (`middleware.ts`): `/dashboard/**` 미인증 접근 시 `/login` 리다이렉트. `RoleGate` 컴포넌트로 viewer/analyst/admin RBAC 조건부 렌더링. `Sidebar` 7개 네비게이션 항목 역할별 가시성 제어.
+- **Keycloak realm-export.json 갱신** (`deployments/keycloak/realm-export.json`): OIDC Public Client(`iroum-ax-web`) 추가 — PKCE, redirect URI `http://localhost:3000/api/auth/callback` (백엔드 0-diff 예외, OPEN #2 RESOLVED).
+- **증빙 관리 UI** (Phase B, 7파일): `GET /api/v1/evidences` 목록(pagination), `POST /api/v1/evidences` multipart 업로드 프록시(100MB 클라이언트 가드), `GET /api/v1/evidences/{id}` 상세. 드래그-드롭 업로드 드롭존(analyst/admin 한정), 페이지네이션 목록, 상세 모달.
+- **평가항목 트리 + 점수 입력 UI** (Phase C, 13파일): `parent_id` 기반 플랫→트리 클라이언트 재구성(고아 항목 fail-soft 승격), code 자연 정렬. 2-패널 레이아웃(접이식 트리 좌 + 상세/점수입력 폼 우). 점수 입력/수정 폼 RoleGate analyst/admin 한정. BFF: 평가항목 목록/상세, 점수 목록/생성/상세/수정.
+- **범주 리포트 뷰** (Phase D, 6파일): `GET /api/v1/reports/category/{id}` 프록시. 범주 선택 드롭다운, 등급 배지(A→E, 초록→빨강). SSR 초기 범주 목록 로드.
+- **리뷰 워크플로 Kanban 보드** (Phase E, 11파일): CSS-only 4-컬럼 Kanban(SUBMITTED/UNDER_REVIEW/APPROVED/REJECTED). 리뷰 제출(analyst/admin), 리뷰어 배정·승인·반려(admin) 인라인 폼. terminal 상태 카드 액션 버튼 비표시.
+- **감사 로그 뷰어 + 루브릭 설정** (Phase F, 10파일): 감사 로그 7개 쿼리 파라미터 허용 목록 + 페이지네이션. 루브릭 임계값 인라인 편집 + 신규 생성. `[scope]` 경로 순회 가드(`^[A-Za-z0-9:_-]{1,64}$` 정규식). Admin 전용 RSC 가드(역할 검사 렌더링 전 차단).
+- **공통 횡단 구현**: 한국어 정적 메시지 사전(`lib/i18n/ko.ts`), ApiError 표준화 fetch wrapper, 401 자동 refresh 1회 + 실패 시 `/login` redirect, 403 한국어 toast, 로딩 skeleton.
+- **consumer-only 0-diff [HARD]**: `apps/control-plane/**`·`go.mod`·`pyproject.toml`·`pipelines/**` 무변경. 31 endpoints 사용(phantom endpoint 0건).
+
+---
+
+## [Unreleased] - 2026-05-20
+
+### Added — SPEC-AX-REVIEW-001 v0.1.1 (평가 제출/승인 워크플로우 store + HTTP API 수직 슬라이스)
+
+- **6개 REST 엔드포인트** (`apps/control-plane/cmd/server/review_handlers.go`): `POST /api/v1/reviews` (검토 요청 생성, 201) · `GET /api/v1/reviews` (목록 조회) · `GET /api/v1/reviews/{id}` (단건 조회) · `POST /api/v1/reviews/{id}/assign-reviewer` (검토자 배정) · `POST /api/v1/reviews/{id}/approve` (승인) · `POST /api/v1/reviews/{id}/reject` (반려). Go1.22 ServeMux 최장일치 라우팅(`score_handlers.go` 선례 미러).
+- **ReviewHandler** (`cmd/server/review_handlers.go`): `ReviewHandler` struct + `NewReviewHandler(reviewStore ScoreReviewRequestStore, scoreStore ScoreStore, logger)` + `Routes() http.Handler`. cross-store 2-TX 패턴(TX-1: scoreStore read-only score 존재 검증, TX-2: reviewStore write 상태 전이), `SELECT FOR UPDATE` 비관적 락(동시 전이 중복 방지), 4-state machine(`SUBMITTED→UNDER_REVIEW→APPROVED/REJECTED` 단방향 비가역), `resolveCreatedBy(r)` → `userID` 파라미터 영속화(`BeginScoreReviewRequestTx` 서명), 표준 에러 본문 `{"error":{"code","message","field"}}`.
+- **server.go 마운트** (`cmd/server/server.go`, ≈7줄 최소 단위): `reviewH` 필드 + `NewReviewHandler(pgStore, pgStore, logger)` + `innerMux.Handle("/api/v1/reviews", ...)` + `innerMux.Handle("/api/v1/reviews/", ...)` 2줄. 기존 `RESTAuthzMiddleware` 와이어링 자동 적용, ABAC 와이어링 0-diff(analyst=submit, admin=assign/approve/reject, 전 role=read).
+- **score_review_requests 테이블** (`.moai/db/schema/migrations/0005_score_review_request_tables.sql`): 11컬럼(`id UUID PK`, `score_id UUID`, `status VARCHAR(32) DEFAULT 'SUBMITTED'`, `assigned_reviewer_id VARCHAR(128)`, `rejection_reason TEXT`, `comment TEXT`, `metadata JSONB`, `created_at/updated_at TIMESTAMPTZ`, `created_by/updated_by VARCHAR(128) DEFAULT 'cli-anonymous'`). CHECK 제약 2종(`status` 열거형 4값, `rejection_reason` REJECTED 시 필수). 인덱스 3개(`score_id`, `status`, `created_at DESC`).
+- **consumer-only 0-diff [HARD]**: `internal/store|audit|auth|errors`·`score_handlers.go`·`evidence_handlers.go`·`report_handlers.go`·기존 마이그레이션 무변경. 신규 DB 마이그레이션 1건(0005)·신규 외부 의존 0건.
+- **TDD GAN iter2 PASS**: iter1 FAIL 73.5 (Must-Pass UBI-003 위반 — D1 `NewRecorder(false)` 반환으로 auth-enabled 시 `userID`가 항상 `'cli-anonymous'`로 고정) → iter2 PASS 92.8 (D1 root cause fix: `NewRecorder(true)` 전환 + `userID` 파라미터 전파). T-111 DB-level CHECK(false) audit fault rollback(EVAL-ITEM-001 동형 패턴). 이중 게이트 PASS: evaluator-active 92.8 / manager-quality TRUST 5 PASS. integration 14/14(testcontainers).
+
+---
+
+## [Unreleased] - 2026-05-19
+
+### Added — SPEC-AX-REPORT-001 v0.1.1 (경영평가 결과 리포트/집계 HTTP API 계층)
+
+- **단건 REST 엔드포인트 1개** (`apps/control-plane/cmd/server/report_handlers.go`): `GET /api/v1/reports/category/{id}` — 범주별 집계 리포트(범주 id·name, 자식 item별 `weighted_sum`, `category_total`, `category_grade` string|null, `generated_at`). 목록/페이지네이션 미적용(PoC 단건만 — §6.3 OPEN #3 RESOLVED B-2).
+- **ReportHandler** (`cmd/server/report_handlers.go`): `ReportHandler` struct + `NewReportHandler(ss ScoreStore, eis EvalItemStore, logger)` + `Routes() http.Handler`. cross-store 2-TX read 조합(EvalItemTx: `GetEvalItemByID`+`GetEvalItemsByParentID` / ScoreTx: `SumWeightedByEvaluationItem`×N+`DetermineGrade`), `math/big.Rat` 무손실 누적(float64 미경유 SEC-03), `ErrGradeThresholdsUnavailable`→`category_grade:null` B-2 graceful. 표준 에러 본문 `{"error":{"code","message","field"}}` 한국어(`score_handlers.go` 선례 미러). recorder 미주입 — read-only·mutation 0·자체 audit 0(REQ-REPORT-UBI-002).
+- **server.go 마운트** (`cmd/server/server.go`, ≈7줄 최소 단위): `reportH` 필드 + `NewReportHandler(pgStore, pgStore, logger)` + `innerMux.Handle("/api/v1/reports", ...)` + `innerMux.Handle("/api/v1/reports/", ...)` 2줄. Go1.22 ServeMux path-param 라우팅 구조적 필수(`score_handlers.go:263-264` 선례 정확 미러). ABAC 와이어링 0-diff.
+- **consumer-only 0-diff**: `internal/store|audit|auth|errors`·`score_handlers.go`·`evidence_handlers.go`·`.moai/db/schema/**` 무변경. 신규 DB 마이그레이션 0건·신규 store 메서드 0건·신규 외부 의존 0건(go.mod 핀 `github.com/jackc/pgx/v5 v5.9.2` 유지, `math/big` stdlib). read-only·API 자체 audit 0건.
+- **TDD RED-GREEN-REFACTOR**: genuine RED-first(D-1 negative-control mutation-tested 포함). 이중 게이트 PASS: evaluator-active 90.8 / manager-quality TRUST 5 PASS. `report_handlers.go` 커버리지 100%.
+
+### Added — SPEC-AX-SCORE-API-001 v0.1.1 (경영평가 점수 조회/집계 HTTP API 계층)
+
+- **7개 REST 엔드포인트** (`apps/control-plane/cmd/server/score_handlers.go`): `GET /api/v1/scores/{id}` (단건 조회) · `GET /api/v1/scores` (목록, filter+pagination) · `GET /api/v1/scores/rollup` (가중 롤업, pgtype.Numeric 정밀도) · `GET /api/v1/scores/grade` (등급 조회) · `POST /api/v1/scores` (생성, 201) · `PUT /api/v1/scores/{id}` (수정, CONFIRMED 불변 409) · `POST /api/v1/scores/{id}/supersede` (CONFIRMED 정정, 201). Go1.22 ServeMux 최장일치 라우팅.
+- **ScoreHandler** (`cmd/server/score_handlers.go`): `ScoreHandler` struct + `NewScoreHandler(store, logger)` + `Routes() http.Handler`. 핸들러-로컬 ABAC write-role 게이팅(`requireScoreWriteRole`, write={RoleAdmin,RoleAnalyst}), store 에러 센티넬→HTTP 결정적 매핑(`mapStoreErr`), TX orchestration(BeginScoreTx→Commit, defer Rollback committed-flag), pagination clamp(default=50, max=500), 표준 에러 본문 `{"error":{"code","message","field"}}`.
+- **server.go 마운트** (`cmd/server/server.go`, ≈7줄 최소 단위): `scoreH` 필드(L55) + `NewScoreHandler` 생성자(L209) + `innerMux.Handle` 2줄(L263-264: `/api/v1/scores` + `/api/v1/scores/` 서브트리). 기존 `RESTAuthzMiddleware` 와이어링 자동 적용, ABAC 와이어링 0-diff.
+- **consumer-only 0-diff**: `internal/store|audit|auth|errors`·`evidence_handlers.go`·`.moai/db/schema/**` 무변경. 신규 DB 마이그레이션 0건 (순수 API 계층 — `scores`/`grade_thresholds`는 SPEC-AX-SCORE-001이 제공). API 자체 audit 0건 (store `RecordScore*` 동일 TX 전담).
+- **TDD RED-GREEN-REFACTOR**: 커밋 8a61193. evaluator-active PASS 0.9235 / manager-quality TRUST 5 PASS / 커버리지 95.79%.
+
+### Added — SPEC-AX-SCORE-001 v0.1.3 (경영평가 점수 산출/집계 Walking Skeleton)
+
+- **점수 데이터 모델** (`scores` + `grade_thresholds` 2테이블, `.moai/db/schema/migrations/0004_score_tables.sql`): Decision 1 Option A — 단일 `scores` 테이블 + `level` discriminator(`raw`/`item`/`category`). `id UUID PK DEFAULT uuid_generate_v4()`, `evaluation_item_id VARCHAR(64)` (FK 없는 stub, EVAL-ITEM-001 호환), `evidence_id UUID nullable` (FK 없는 stub, EVID-001 호환), `score_value DECIMAL(6,2)`, `weight DECIMAL(5,4) NULL` (NULL-weight policy: exclude, GAP-01), `grade VARCHAR(2) NULL`, `status VARCHAR(32) DEFAULT 'DRAFT'` CHECK(`DRAFT`/`CONFIRMED`/`SUPERSEDED`, D4 state-machine), `metadata JSONB`, `created_by DEFAULT 'cli-anonymous'`. CHECK 제약 3종(`level`, `status`, `grade`), 인덱스 3개. `grade_thresholds`(scope, letter, min_value, boundary_rule, PK(scope,letter)) — Decision 3, 최소 등급 임계값 테이블(풀 rubric 아님).
+- **ScoreStore / ScoreTx 계층** (`internal/store/store.go`, `internal/store/score.go`): `ScoreStore` 인터페이스(`BeginScoreTx`) + `ScoreTx` 인터페이스 + `PgScoreTx` 구현체. 7 메서드: `InsertScore`(DRAFT 생성+audit), `GetScoreByID`, `GetScoresByEvaluationItem`, `UpdateScore`(D4 CONFIRMED 불변 가드+status 전이 검증+audit), `SupersedeAndReplaceScore`(CONFIRMED 정정: 신규 INSERT + SUPERSEDED UPDATE + 2 audit, append-only), `SumWeightedByEvaluationItem`(pgtype.Numeric 정밀도, SEC-03), `DetermineGrade`(grade_thresholds 결정적 스캔, fail-closed). `InsertAuditLog`, `Commit`, `Rollback` 포함.
+- **BeginScoreTx pool 재사용** (`internal/store/pg_store.go`): `PgWorkflowStore.pool` 단일 pgx 풀 재사용 — 신규 풀 연결 0건 (SPEC-AX-CTRL-001 / SPEC-AX-EVID-001 / SPEC-AX-EVAL-ITEM-001 동일 패턴).
+- **감사 Recorder 확장** (`internal/audit/recorder.go`): `RecordScoreCreated(ctx, tx AuditTx, scoreID uuid.UUID, evaluationItemID, level, userID string)` / `RecordScoreUpdated(...)` 추가. Decision 2 — resource_id = `scores.id` UUID 직접 대입(surrogate 불필요, EVAL-ITEM-001과 달리 UUID PK).
+- **액션 상수 2종** (`internal/audit/audit.go`): `ActionScoreCreated = "SCORE_CREATED"`, `ActionScoreUpdated = "SCORE_UPDATED"` 추가. 신규 namespace 상수 0건.
+- **에러 센티널 6종** (`internal/errors/errors.go`): `ErrScoreNotFound`, `ErrScoreInvalidInput`, `ErrScoreImmutable`, `ErrScoreInvalidStatus`, `ErrGradeThresholdsUnavailable`, `ErrScoreAuditWriteFailed`, `ErrScoreNotConfirmed` (실질 7종, 연산 단위 별 명확한 구분).
+- **Walking Skeleton 범위**: 데이터 모델 + store 계층 + audit 연계 — **HTTP 엔드포인트 없음, REST/gRPC 핸들러 없음, cmd/server 변경 없음.**
+- **GAN 평가**: iter1 FAIL 46.25 → iter2 PASS 85.25 (DC-UBI-002 audit 원자성·DC-UBI-004 CONFIRMED 불변·SEC-03 pgtype.Numeric 3건 해소); 통합 테스트 `ok store 278.986s`, 커버리지 87.2%; evaluator-active PASS 85.25/100
+
+### Deferred — SPEC-AX-SCORE-001
+
+- HTTP CRUD 엔드포인트 / REST API (점수 생성·조회·집계·등급) — 후속 SPEC
+- 풀 집계 엔진 (깊은 재귀 롤업, score_aggregates 영속, incremental 집계) — 후속 SPEC
+- 풀 등급기준(scoring rubric) 시스템 (룰 엔진, 가점/감점, 계층) — 후속 SPEC
+- `scores.evaluation_item_id → evaluation_items(id)` / `scores.evidence_id → evidences(id)` FK 하드닝 — 후속 SPEC
+- LLM 등급 시뮬레이션 / Recommendation 엔진 — 후속 Python/AI 파이프라인 SPEC
+
+---
+
+## [Unreleased] - 2026-05-18
+
+### Added — SPEC-AX-EVAL-ITEM-001 v0.1.3 (경영평가 평가항목 taxonomy Walking Skeleton)
+
+- **평가항목 데이터 모델** (`evaluation_items` 테이블, `.moai/db/schema/migrations/0003_eval_item_tables.sql`): Option A 자기참조 adjacency list 단일 테이블. `id VARCHAR(64) PK` (계층 코드 형태, e.g. `AX-SAFETY-ORG-01`), `parent_id VARCHAR(64) REFERENCES evaluation_items(id) ON DELETE RESTRICT` (root = NULL), `hierarchy_code VARCHAR(128) NOT NULL UNIQUE`, `display_name VARCHAR(256) NOT NULL`, `level INT NOT NULL`, `status VARCHAR(32) DEFAULT 'ACTIVE'` CHECK(`ACTIVE`,`DEPRECATED`,`ARCHIVED`), `metadata JSONB`. 인덱스 3개 (`evaluation_items_parent_id_idx`, `evaluation_items_hierarchy_code_idx`, `evaluation_items_created_at_idx`). **단일 테이블 — 추가 테이블 없음.**
+- **EvalItemStore / EvalItemTx 계층** (`internal/store/store.go`, `internal/store/eval_item.go`): `EvalItemStore` 인터페이스 (`BeginEvalItemTx`) + `EvalItemTx` 인터페이스 (`InsertEvalItem`, `GetEvalItemByID`, `GetEvalItemsByParentID`, `UpdateEvalItem`, `InsertAuditLog`, `Commit`, `Rollback`). `PgEvalItemTx` 구현체 — `validateStatusTransition` / `checkHierarchyMutationGuard` / `buildEvalItemUpdateSet` 3-헬퍼 분리(M1 리팩터). `EvalItemUpdate`는 포인터 필드(`Status *string`, `Metadata *map[string]any`)로 부분 업데이트 지원.
+- **BeginEvalItemTx pool 재사용** (`internal/store/pg_store.go`): `PgWorkflowStore.pool` 단일 pgx 풀 재사용 — 신규 풀 연결 0건 (SPEC-AX-CTRL-001 / SPEC-AX-EVID-001 `BeginWorkflowTx` / `BeginEvidenceTx` 동일 패턴).
+- **감사 Recorder 확장** (`internal/audit/recorder.go`): `RecordEvalItemCreated` / `RecordEvalItemUpdated` 추가 — AUD-1 결정적 UUIDv5 surrogate: `resource_id = uuid.NewSHA1(EvalItemAuditNamespace, []byte(hierarchyCode))`. 실 식별자(`eval_item_id`, `hierarchy_code`, `parent_id`, `level`)는 `DetailsJSON`에 저장. `resource_id`는 원시 계층 코드가 아닌 UUIDv5.
+- **EvalItemAuditNamespace** (`internal/audit/audit.go`): `var EvalItemAuditNamespace = uuid.MustParse("a7f3c2e1-9b4d-5e6f-8a0b-1c2d3e4f5a6b")` — AUD-1 불변식 컴파일 타임 상수 (@MX:ANCHOR). `ActionEvalItemCreated = "EVAL_ITEM_CREATED"`, `ActionEvalItemUpdated = "EVAL_ITEM_UPDATED"` 액션 상수 추가.
+- **에러 센티널 5종** (`internal/errors/errors.go`): `ErrEvalItemNotFound`, `ErrEvalItemInvalidInput`, `ErrEvalItemParentNotFound`, `ErrEvalItemHierarchyImmutable`, `ErrEvalItemInvalidStatus` 추가적 합산 (기존 sentinel 비변경).
+- **Walking Skeleton 범위**: 데이터 모델 + store 계층 + audit 연계 — **HTTP 엔드포인트 없음, REST/gRPC 핸들러 없음, cmd/server 변경 없음.**
+- **커버리지**: `eval_item.go` 86.2% (목표 85%+ 충족); TDD RED-GREEN-REFACTOR 방법론
+- evaluator-active PASS — Functionality 96 / Security 95 / Craft 82 / Consistency 97; plan-auditor PASS 0.955
+
+### Deferred — SPEC-AX-EVAL-ITEM-001
+
+- HTTP CRUD 엔드포인트 / REST API — 후속 SPEC
+- Console UI / 평가편람 HWP·PDF import — 후속 SPEC
+- `evidences.evaluation_item_id` FK 하드닝 (EVID-001 코드 변경 포함) — 후속 SPEC
+
+---
+
+### Added — SPEC-AX-EVID-001 v0.1.0 (경영평가 증빙 자료 수집/관리)
+
+- **증빙 데이터 모델** (`evidences` 테이블, `.moai/db/schema/migrations/0002_evidence_tables.sql`): `id UUID PK`, `evaluation_item_id VARCHAR(64)` (FK 제약 없음), `version INT`, `previous_version_id UUID` 자기 참조, `file_content BYTEA` (database_blob 전략 시 바이너리 저장 컬럼), `storage_location VARCHAR(255)`, `storage_strategy VARCHAR(32)`, `file_hash_sha256`, `created_by DEFAULT 'cli-anonymous'` 등. 인덱스 2개 (`evidences_eval_item_version_idx`, `evidences_created_at_idx`).
+- **단일 증빙 엔드포인트** (`POST /api/v1/evidences`, `cmd/server/evidence_handlers.go`): 증빙 생성(version=1)과 버전 업(version+1)을 단일 핸들러 `handleCreateEvidence`로 통합. multipart 수신 → Content-Type/Content-Length 사전 검증 → SHA-256 단일 패스 스트리밍 → pre-TX 입력 검증 → `BeginEvidenceTx` → `SELECT FOR UPDATE` 버전 결정 → `InsertEvidence(file_content)` → 감사 기록 → Commit → 201 `{evidence_id, version}` 반환.
+- **저장 전략 추상화** (`internal/storage/storage.go`): `EvidenceBlobStore` 인터페이스 + `dbBlobStore` 구현체. database_blob 전략에서 blob bytes는 이 인터페이스를 통과하지 않으며 `EvidenceTx.InsertEvidence(file_content)`로 동일 pgx TX에 저장; `dbBlobStore.Put`은 논리 위치 문자열 `db://evidences/<uuid>` 만 반환 (외부 SaaS SDK 의존 0건 — REQ-EVID-UBI-001 망분리 정합).
+- **감사 Recorder 확장** (`internal/audit/recorder.go`): `RecordEvidenceCreated` / `RecordEvidenceVersioned` 메서드 추가 — 각각 `EVIDENCE_CREATED`, `EVIDENCE_VERSIONED` 액션으로 동일 AuditTx 내 audit_logs 원자 기록 (REQ-EVID-UBI-002).
+- **Clock 주입 추상화** (`internal/audit/clock.go`): `Clock` 인터페이스 + `systemClock` 기본 구현 — 증빙 감사 시각 검증을 위한 테스트 친화 구조.
+- **환경 변수 3종** (`internal/config/config.go`): `EVIDENCE_STORAGE_STRATEGY` (기본 `database_blob`), `EVIDENCE_MAX_FILE_BYTES` (기본 50 MiB), `EVIDENCE_DUPLICATE_SIGNAL_ENABLED` (기본 `false`). `Validate()` / `LoadConfig()`로 fail-fast 열거 검증.
+- **에러 센티널** (`internal/errors/errors.go`): `ErrEvidenceNotFound`, `ErrEvidenceImmutable` 추가 (GAP-03/04 해소).
+- **TDD 기반 구현**: evidence-core 커버리지 91.4%, 신규 테스트 다수 (store/audit/handler 각 파일 분리).
+- evaluator-active Phase 2.8a 재평가 PASS 0.930
+
+### Fixed — SPEC-AX-EVID-001
+
+- GAP-01 (`POST /api/v1/evidences` 단일 라우트로 생성+버전 통합): 해소
+- GAP-03/04 (`ErrEvidenceNotFound`, `ErrEvidenceImmutable` 센티널): 해소
+- database_blob 전략 RESOLVED (plan.md §6): 외부 저장소 의존 없는 pgx TX 내 BYTEA 직접 저장으로 확정
+
+### Known — SPEC-AX-EVID-001 범위 외 기지 항목
+
+- `TestE2E_GRPC_Authz_ViewerForbidden_Create`: SPEC-AX-AUTH-002/SERVER-001 범위의 pre-existing 실패, 본 SPEC 범위 밖
+
+---
+
+### Added — SPEC-AX-AUTH-003 v0.1.0 (경량 ABAC — 속성 기반 접근 제어)
+
+- **ABACEvaluator** (`internal/auth/abac.go`): RBAC 위에 속성 기반 접근 제어 레이어; `authn → authz(RBAC) → ABAC → handler` 체인 (chain.go 무변경)
+- **OwnershipCondition**: X-Resource-Owner 헤더 기반 문서 소유권 검사; 비소유자 접근 시 `ABAC_CONDITION_DENIED` 403 반환
+- **OrgUnitCondition**: scope 토큰 `iroum-ax-org:<unit>` 기반 조직 단위 격리; 교차 조직 접근 차단 (비-Admin)
+- **TimeWindowCondition**: KST 09:00–18:00 업무 시간 제한; `time.FixedZone("KST",9*3600)` 강제 (time.LoadLocation 금지, 망분리 정합)
+- **Admin bypass**: `RoleAdmin` 감지 시 모든 ABAC 조건 우회 (REQ-ABAC-004)
+- **Fail-safe no-op**: 정책 미정의·조건 오류 시 ALLOW + 로그 (REQ-ABAC-009); 기본 정책 = 빈 집합
+- **ActionABACDenied**: `internal/audit/audit.go`에 Sprint 0 D5 상수 추가
+- **ABACMiddleware**: `cmd/server/server.go` REST mux 래핑 (BuildRESTChain 내부 무변경)
+- 30 AC 검증, abac.go 98.5% 커버리지, evaluator-active PASS 0.905 (Func 0.92/Sec 0.90/Craft 0.92/Cons 0.88)
+- plan-auditor PASS 0.93 (iter 2) — EARS 30 AC, 9 REQ (망분리/frozen/fail-safe)
+
+### Fixed — SPEC-AX-AUTH-003
+
+- AUTH-002 §6 Excl #4 (ABAC 속성 조건): 해소 (OwnershipCondition + OrgUnitCondition + TimeWindowCondition 구현)
+
+### Deferred — SPEC-AX-AUTH-003
+
+- `audit.Recorder.LogForbiddenEvent` 운영 구현 (AC-007-3 정상 경로 활성화) — Sprint 2
+- 자원별 ABAC 정책 추가 (`DefaultABACPolicies` 현재 빈 집합) — Sprint 2
+- OwnershipCondition X-Resource-Owner 헤더 기본 파서 배선 + 입력 bound — Sprint 2
+- gRPC endpoint ABAC 적용 — 별도 SPEC 검토
+
+---
 
 ### Added — SPEC-AX-OBS-001 v0.1.2 (Prometheus Metrics + OpenTelemetry Tracing Skeleton)
 - **Metrics Registry**: `prometheus/client_golang` 기반 레지스트리 싱글톤 (`internal/metrics/registry.go`)

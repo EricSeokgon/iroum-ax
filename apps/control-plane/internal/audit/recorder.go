@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,15 +37,43 @@ type AuditTx interface {
 // @MX:ANCHOR: [AUTO] 8종 감사 액션 기록의 단일 진입점 (fan_in: gRPC 핸들러, 워크플로우 핸들러, callback)
 // @MX:REASON: REQ-CTRL-UBI-002 AC-UBI-002-A/B/C 모두 이 Recorder를 통해 검증
 type Recorder struct {
+	// clock 시각 제공자 — 증빙 감사 경로 테스트 친화 (R-EVID-007/T-018)
+	// nil이면 defaultClock(systemClock) 사용 — 기존 time.Now().UTC()와 동일 동작
+	clock Clock
 	// authEnabled false이면 user_id를 DefaultUserID로 강제
 	// Walking Skeleton 기본값: false (SPEC §5 Exclusion §2)
 	authEnabled bool
 }
 
+// RecorderOption Recorder 생성 시 선택적 의존성 주입 (기능 옵션 패턴)
+type RecorderOption func(*Recorder)
+
+// WithClock 테스트에서 고정 시각 Clock을 주입 (R-EVID-007 — 증빙 감사 시각 검증)
+func WithClock(c Clock) RecorderOption {
+	return func(r *Recorder) { r.clock = c }
+}
+
 // NewRecorder 새 Recorder 인스턴스를 생성
 // authEnabled: 인증 활성화 여부 (config.Config.AuthEnabled 값 전달)
-func NewRecorder(authEnabled bool) *Recorder {
-	return &Recorder{authEnabled: authEnabled}
+// opts: 선택적 의존성 (WithClock 등) — 미지정 시 기존 동작과 byte-identical
+func NewRecorder(authEnabled bool, opts ...RecorderOption) *Recorder {
+	r := &Recorder{authEnabled: authEnabled, clock: defaultClock}
+	for _, o := range opts {
+		o(r)
+	}
+	if r.clock == nil {
+		r.clock = defaultClock
+	}
+	return r
+}
+
+// nowUTC Recorder의 주입된 Clock에서 현재 UTC 시각을 반환
+// 증빙 감사 메서드 전용 — 기존 워크플로우 메서드는 직접 time.Now().UTC() 유지 (scope 최소화)
+func (r *Recorder) nowUTC() time.Time {
+	if r.clock == nil {
+		return time.Now().UTC()
+	}
+	return r.clock.NowUTC()
 }
 
 // resolveUserID 요청에서 전달된 userID를 반환하거나,
@@ -209,3 +238,444 @@ func (r *Recorder) RecordCreateCancelled(ctx context.Context, tx AuditTx, workfl
 	}
 	return tx.InsertAuditLog(ctx, e)
 }
+
+// RecordEvidenceCreated EVIDENCE_CREATED 감사 이벤트를 기록 (SPEC-AX-EVID-001)
+// 신규 증빙(version=1) 생성과 동일 AuditTx에 audit_logs 1건 (REQ-EVID-UBI-002 / REQ-EVID-003-E1)
+// details JSONB: {evaluation_item_id, version, file_hash_sha256} (previous_version_id 없음)
+//
+// @MX:ANCHOR: [AUTO] 증빙 생성 감사 단일 진입점 — REQ-EVID-UBI-002-A AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — 증빙 감사 완결성 계약
+func (r *Recorder) RecordEvidenceCreated(ctx context.Context, tx AuditTx, evidenceID, evalItemID, fileHashSHA256 string, version int, userID string) error {
+	details, err := json.Marshal(map[string]string{
+		"evaluation_item_id": evalItemID,
+		"version":            strconv.Itoa(version),
+		"file_hash_sha256":   fileHashSHA256,
+	})
+	if err != nil {
+		return fmt.Errorf("recorder: marshal evidence created details: %w", err)
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionEvidenceCreated,
+		ResourceType: "evidence",
+		ResourceID:   parseResourceID(evidenceID),
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordEvidenceVersioned EVIDENCE_VERSIONED 감사 이벤트를 기록 (SPEC-AX-EVID-001)
+// 기존 증빙 재업로드(version+1)와 동일 AuditTx에 audit_logs 1건 (REQ-EVID-UBI-002 / REQ-EVID-003-E1)
+// details JSONB: {evaluation_item_id, version, file_hash_sha256, previous_version_id}
+//
+// @MX:ANCHOR: [AUTO] 증빙 버전 감사 단일 진입점 — REQ-EVID-UBI-002-B AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — 버전 감사 완결성 계약
+func (r *Recorder) RecordEvidenceVersioned(ctx context.Context, tx AuditTx, evidenceID, evalItemID, fileHashSHA256 string, version int, previousVersionID, userID string) error {
+	details, err := json.Marshal(map[string]string{
+		"evaluation_item_id":  evalItemID,
+		"version":             strconv.Itoa(version),
+		"file_hash_sha256":    fileHashSHA256,
+		"previous_version_id": previousVersionID,
+	})
+	if err != nil {
+		return fmt.Errorf("recorder: marshal evidence versioned details: %w", err)
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionEvidenceVersioned,
+		ResourceType: "evidence",
+		ResourceID:   parseResourceID(evidenceID),
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// evalItemResourceID 계층코드를 AUD-1 결정적 UUIDv5 surrogate로 변환한다.
+// evaluation_items.id는 VARCHAR(64) 계층코드라 audit_logs.resource_id(uuid.UUID NOT NULL)에
+// 직접 들어갈 수 없다 (parseResourceID는 uuid.Nil 반환 — E-07 회피). 고정 namespace 기반
+// uuid.NewSHA1로 동일 hierarchy_code는 항상 byte-identical UUID를 산출한다 (§6.6 AUD-1).
+//
+// uuid.NewSHA1은 RFC 4122 v5 정의상 SHA-1을 사용한다 — 식별자 파생이지 암호 해시가 아님.
+//
+//nolint:gosec // RFC 4122 UUID v5 name-based, not cryptographic (SEC-07)
+func evalItemResourceID(hierarchyCode string) uuid.UUID {
+	return uuid.NewSHA1(EvalItemAuditNamespace, []byte(hierarchyCode))
+}
+
+// evalItemDetails 평가항목 감사 DetailsJSON을 직렬화한다.
+// 실 식별자(eval_item_id, hierarchy_code, parent_id?, level?)는 resource_id surrogate가
+// 보유할 수 없으므로 details에 기록한다 (REQ-EVALITEM-003-E1). parentID 빈 문자열이면 키 부재.
+func evalItemDetails(itemID, hierarchyCode, parentID string, level int) ([]byte, error) {
+	d := map[string]string{
+		"eval_item_id":   itemID,
+		"hierarchy_code": hierarchyCode,
+		"level":          strconv.Itoa(level),
+	}
+	if parentID != "" {
+		d["parent_id"] = parentID
+	}
+	b, err := json.Marshal(d)
+	if err != nil {
+		return nil, fmt.Errorf("recorder: marshal eval_item details: %w", err)
+	}
+	return b, nil
+}
+
+// RecordEvalItemCreated EVAL_ITEM_CREATED 감사 이벤트를 기록 (SPEC-AX-EVAL-ITEM-001)
+// 항목(루트/자식) 생성과 동일 AuditTx에 audit_logs 1건 (REQ-EVALITEM-UBI-002 / REQ-EVALITEM-003-E1)
+// resource_id = AUD-1 결정적 UUIDv5 surrogate, 실 식별자는 DetailsJSON (§6.6)
+//
+// @MX:ANCHOR: [AUTO] 평가항목 생성 감사 단일 진입점 — REQ-EVALITEM-UBI-002 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — AUD-1 결정성 계약 (SEC-05)
+func (r *Recorder) RecordEvalItemCreated(ctx context.Context, tx AuditTx, itemID, hierarchyCode, parentID string, level int, userID string) error {
+	details, err := evalItemDetails(itemID, hierarchyCode, parentID, level)
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionEvalItemCreated,
+		ResourceType: "evaluation_item",
+		ResourceID:   evalItemResourceID(hierarchyCode),
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordEvalItemUpdated EVAL_ITEM_UPDATED 감사 이벤트를 기록 (SPEC-AX-EVAL-ITEM-001)
+// 항목 속성/상태 변경과 동일 AuditTx에 audit_logs 1건 (REQ-EVALITEM-UBI-002 / REQ-EVALITEM-004-O1)
+// RecordEvalItemCreated와 동일 resource_id 산출 로직 — 동일 hierarchy_code 상관관계 유지
+//
+// @MX:ANCHOR: [AUTO] 평가항목 수정 감사 단일 진입점 — REQ-EVALITEM-UBI-002 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — AUD-1 결정성 계약 (SEC-05)
+func (r *Recorder) RecordEvalItemUpdated(ctx context.Context, tx AuditTx, itemID, hierarchyCode, parentID string, level int, userID string) error {
+	details, err := evalItemDetails(itemID, hierarchyCode, parentID, level)
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionEvalItemUpdated,
+		ResourceType: "evaluation_item",
+		ResourceID:   evalItemResourceID(hierarchyCode),
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordScoreCreated SCORE_CREATED 감사 이벤트를 기록 (SPEC-AX-SCORE-001)
+// 점수 생성과 동일 AuditTx에 audit_logs 1건 (REQ-SCORE-004)
+// D2: resource_id = scores.id UUID 직접 대입 — uuid.NewSHA1/AUD-1 surrogate 미사용
+//
+// @MX:ANCHOR: [AUTO] 점수 생성 감사 단일 진입점 — REQ-SCORE-004 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — D2 직접 UUID 계약 (SPEC-AX-SCORE-001)
+func (r *Recorder) RecordScoreCreated(ctx context.Context, tx AuditTx, scoreID uuid.UUID, evaluationItemID, level, userID string) error {
+	details, err := scoreDetails(scoreID, evaluationItemID, level)
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionScoreCreated,
+		ResourceType: "score",
+		ResourceID:   scoreID, // D2: 직접 대입, surrogate 금지
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordScoreUpdated SCORE_UPDATED 감사 이벤트를 기록 (SPEC-AX-SCORE-001)
+// 점수 수정과 동일 AuditTx에 audit_logs 1건 (REQ-SCORE-004)
+// D2: resource_id = scores.id UUID 직접 대입 — uuid.NewSHA1/AUD-1 surrogate 미사용
+//
+// @MX:ANCHOR: [AUTO] 점수 수정 감사 단일 진입점 — REQ-SCORE-004 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — D2 직접 UUID 계약 (SPEC-AX-SCORE-001)
+func (r *Recorder) RecordScoreUpdated(ctx context.Context, tx AuditTx, scoreID uuid.UUID, evaluationItemID, level, userID string) error {
+	details, err := scoreDetails(scoreID, evaluationItemID, level)
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionScoreUpdated,
+		ResourceType: "score",
+		ResourceID:   scoreID, // D2: 직접 대입, surrogate 금지
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// scoreDetails 점수 감사 이벤트 details JSON 생성 (D2 — score_id/evaluation_item_id/level 포함)
+func scoreDetails(scoreID uuid.UUID, evaluationItemID, level string) ([]byte, error) {
+	m := map[string]string{
+		"score_id":           scoreID.String(),
+		"evaluation_item_id": evaluationItemID,
+		"level":              level,
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("recorder: marshal score details: %w", err)
+	}
+	return b, nil
+}
+
+// reviewRequestDetails 평가 검토 감사 이벤트 details JSON 생성
+// (D2 — score_review_request_id/score_id 포함, 액션-특화 키는 호출자가 추가)
+func reviewRequestDetails(reviewRequestID, scoreID uuid.UUID, extra map[string]string) ([]byte, error) {
+	m := map[string]string{
+		"score_review_request_id": reviewRequestID.String(),
+		"score_id":                scoreID.String(),
+	}
+	for k, v := range extra {
+		m[k] = v
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("recorder: marshal review request details: %w", err)
+	}
+	return b, nil
+}
+
+// RecordScoreReviewRequestCreated SCORE_REVIEW_REQUEST_CREATED 감사 이벤트를 기록 (SPEC-AX-REVIEW-001)
+// 평가 검토 요청 생성과 동일 AuditTx에 audit_logs 1건 (REQ-REVIEW-UBI-002 / REQ-REVIEW-004-E1).
+// D2: resource_id = score_review_requests.id UUID 직접 대입 — uuid.NewSHA1/AUD-1 surrogate 미사용.
+//
+// @MX:ANCHOR: [AUTO] 평가 검토 생성 감사 단일 진입점 — REQ-REVIEW-004 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — D2 직접 UUID 계약 (SPEC-AX-REVIEW-001)
+func (r *Recorder) RecordScoreReviewRequestCreated(ctx context.Context, tx AuditTx, reviewRequestID, scoreID uuid.UUID, userID string) error {
+	details, err := reviewRequestDetails(reviewRequestID, scoreID, nil)
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionScoreReviewRequestCreated,
+		ResourceType: "score_review_request",
+		ResourceID:   reviewRequestID, // D2: 직접 대입, surrogate 금지
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordScoreReviewRequestReviewerAssigned 검토자 할당 감사 이벤트 (SUBMITTED→UNDER_REVIEW)
+// details JSONB에 reviewer_id 포함 (감사 추적용 정보 컬럼).
+//
+// @MX:ANCHOR: [AUTO] 검토자 할당 감사 단일 진입점 — REQ-REVIEW-003-E1 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — 상태 전이 추적 계약
+func (r *Recorder) RecordScoreReviewRequestReviewerAssigned(ctx context.Context, tx AuditTx, reviewRequestID, scoreID uuid.UUID, reviewerID, userID string) error {
+	details, err := reviewRequestDetails(reviewRequestID, scoreID, map[string]string{
+		"reviewer_id": reviewerID,
+	})
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionScoreReviewRequestReviewerAssigned,
+		ResourceType: "score_review_request",
+		ResourceID:   reviewRequestID,
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordScoreReviewRequestApproved 승인 감사 이벤트 (UNDER_REVIEW→APPROVED terminal)
+// details JSONB에 optional comment 포함.
+//
+// @MX:ANCHOR: [AUTO] 평가 검토 승인 감사 단일 진입점 — REQ-REVIEW-003-E2 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — terminal 전이 추적 계약
+func (r *Recorder) RecordScoreReviewRequestApproved(ctx context.Context, tx AuditTx, reviewRequestID, scoreID uuid.UUID, comment, userID string) error {
+	extra := map[string]string{}
+	if comment != "" {
+		extra["comment"] = comment
+	}
+	details, err := reviewRequestDetails(reviewRequestID, scoreID, extra)
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionScoreReviewRequestApproved,
+		ResourceType: "score_review_request",
+		ResourceID:   reviewRequestID,
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordScoreReviewRequestRejected 반려 감사 이벤트 (UNDER_REVIEW→REJECTED terminal)
+// details JSONB에 required rejection_reason + optional comment 포함.
+//
+// @MX:ANCHOR: [AUTO] 평가 검토 반려 감사 단일 진입점 — REQ-REVIEW-003-E3 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — terminal 전이 + reason 추적 계약
+func (r *Recorder) RecordScoreReviewRequestRejected(ctx context.Context, tx AuditTx, reviewRequestID, scoreID uuid.UUID, rejectionReason, comment, userID string) error {
+	extra := map[string]string{
+		"rejection_reason": rejectionReason,
+	}
+	if comment != "" {
+		extra["comment"] = comment
+	}
+	details, err := reviewRequestDetails(reviewRequestID, scoreID, extra)
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionScoreReviewRequestRejected,
+		ResourceType: "score_review_request",
+		ResourceID:   reviewRequestID,
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// rubricDetails 등급 rubric 감사 이벤트 details JSON 공통 생성기
+// (D2 — rubric_id 직접, 부가 키는 extra로 전달)
+func rubricDetails(rubricID uuid.UUID, extra map[string]string) ([]byte, error) {
+	m := map[string]string{
+		"rubric_id": rubricID.String(),
+	}
+	for k, v := range extra {
+		m[k] = v
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("recorder: marshal rubric details: %w", err)
+	}
+	return b, nil
+}
+
+// RecordRubricCreated RUBRIC_CREATED 감사 이벤트를 기록 (SPEC-AX-RUBRIC-001)
+// 등급 rubric 생성과 동일 AuditTx에 audit_logs 1건 (REQ-RUBRIC-UBI-002 / REQ-RUBRIC-001-E1).
+// D2: resource_id = rubrics.id UUID 직접 대입 — uuid.NewSHA1/AUD-1 surrogate 미사용.
+// userID: REVIEW-001 D1 iter2 lesson pre-applied — principal.id 또는 'cli-anonymous' fallback.
+//
+// @MX:ANCHOR: [AUTO] 등급 rubric 생성 감사 단일 진입점 — REQ-RUBRIC-001-E1 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — D2 직접 UUID 계약 (SPEC-AX-RUBRIC-001)
+func (r *Recorder) RecordRubricCreated(ctx context.Context, tx AuditTx, rubricID uuid.UUID, name string, version int, userID string) error {
+	details, err := rubricDetails(rubricID, map[string]string{
+		"name":    name,
+		"version": strconv.Itoa(version),
+	})
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionRubricCreated,
+		ResourceType: "rubric",
+		ResourceID:   rubricID, // D2: 직접 대입, surrogate 금지
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordRubricUpdated RUBRIC_UPDATED 감사 이벤트를 기록 (SPEC-AX-RUBRIC-001 REQ-RUBRIC-003-E1)
+// status 전이 + 메타 변경이 단일 PUT으로 합쳐져도 audit row 1건만 생성 (R-RUBRIC-009).
+// details JSONB는 변경된 필드만 포함하나, PoC 단순화로 rubric_id만 기록(payload은 호출자가 결정).
+//
+// @MX:ANCHOR: [AUTO] 등급 rubric 수정 감사 단일 진입점 — REQ-RUBRIC-003-E1 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — D2 직접 UUID 계약 (SPEC-AX-RUBRIC-001)
+func (r *Recorder) RecordRubricUpdated(ctx context.Context, tx AuditTx, rubricID uuid.UUID, userID string) error {
+	details, err := rubricDetails(rubricID, nil)
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionRubricUpdated,
+		ResourceType: "rubric",
+		ResourceID:   rubricID,
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordRubricArchived RUBRIC_ARCHIVED 감사 이벤트를 기록 (SPEC-AX-RUBRIC-001 REQ-RUBRIC-003-E2)
+// active → archived terminal 전이. archive_reason은 details JSONB에 필수 포함 (OPEN #7 추적성).
+// REVIEW-001 RecordScoreReviewRequestRejected의 rejection_reason 동형 패턴.
+//
+// @MX:ANCHOR: [AUTO] 등급 rubric archive 감사 단일 진입점 — REQ-RUBRIC-003-E2 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — terminal 전이 + reason 추적 계약
+func (r *Recorder) RecordRubricArchived(ctx context.Context, tx AuditTx, rubricID uuid.UUID, archiveReason, userID string) error {
+	details, err := rubricDetails(rubricID, map[string]string{
+		"archive_reason": archiveReason,
+	})
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionRubricArchived,
+		ResourceType: "rubric",
+		ResourceID:   rubricID,
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordRubricCriterionAdded RUBRIC_CRITERION_ADDED 감사 이벤트를 기록 (REQ-RUBRIC-001-E2)
+// rubric_criteria 행 추가와 동일 AuditTx에 audit_logs 1건.
+// D2: resource_id = rubric_criteria.id (criterionID) 직접 대입 — rubric_id는 details에 보관.
+//
+// @MX:ANCHOR: [AUTO] criterion 추가 감사 단일 진입점 — REQ-RUBRIC-001-E2 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — D2 직접 UUID 계약 (SPEC-AX-RUBRIC-001)
+func (r *Recorder) RecordRubricCriterionAdded(ctx context.Context, tx AuditTx, criterionID, rubricID, evalItemID uuid.UUID, userID string) error {
+	details, err := rubricDetails(rubricID, map[string]string{
+		"criterion_id":       criterionID.String(),
+		"evaluation_item_id": evalItemID.String(),
+	})
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionRubricCriterionAdded,
+		ResourceType: "rubric_criterion",
+		ResourceID:   criterionID, // D2: 직접 대입, surrogate 금지
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// RecordRubricBandAdded RUBRIC_BAND_ADDED 감사 이벤트를 기록 (REQ-RUBRIC-001-E3)
+// rubric_bands 행 추가와 동일 AuditTx에 audit_logs 1건.
+// D2: resource_id = rubric_bands.id (bandID) 직접 대입 — rubric_id/letter는 details에 보관.
+//
+// @MX:ANCHOR: [AUTO] band 추가 감사 단일 진입점 — REQ-RUBRIC-001-E3 AC가 이 메서드 경유
+// @MX:REASON: 핸들러 + 통합 테스트 + 감사 검증 등 3곳 이상에서 호출 — D2 직접 UUID 계약 (SPEC-AX-RUBRIC-001)
+func (r *Recorder) RecordRubricBandAdded(ctx context.Context, tx AuditTx, bandID, rubricID uuid.UUID, letter, userID string) error {
+	details, err := rubricDetails(rubricID, map[string]string{
+		"band_id": bandID.String(),
+		"letter":  letter,
+	})
+	if err != nil {
+		return err
+	}
+	e := &Event{
+		Timestamp:    r.nowUTC(),
+		Action:       ActionRubricBandAdded,
+		ResourceType: "rubric_band",
+		ResourceID:   bandID, // D2: 직접 대입, surrogate 금지
+		UserID:       r.resolveUserID(userID),
+		DetailsJSON:  details,
+	}
+	return tx.InsertAuditLog(ctx, e)
+}
+
+// 주의: ApplyRubric은 read-only 연산 — RecordRubricApplied 메서드 신설 0 (OPEN #6 read-only no-audit).
+// UBI-002 second clause "apply read-only 예외" carve-out — REPORT-001 선례 정확 미러.

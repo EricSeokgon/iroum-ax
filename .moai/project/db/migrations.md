@@ -9,7 +9,10 @@ is partially auto-updated by the `moai-domain-db-docs` hook when migration files
 
 | Filename | Applied At | Checksum | Summary |
 |----------|-----------|----------|---------|
-| _TBD_ | _TBD_ | _TBD_ | _TBD_ |
+| `0001_initial.sql` | — | _TBD_ | documents, audit_logs 초기 테이블 (SPEC-AX-CTRL-001) |
+| `0002_evidence_tables.sql` | — | _TBD_ | evidences 테이블 + 인덱스 (SPEC-AX-EVID-001) |
+| `0003_eval_item_tables.sql` | — | _TBD_ | evaluation_items 자기참조 adjacency list (SPEC-AX-EVAL-ITEM-001) |
+| `0004_score_tables.sql` | — | _TBD_ | scores + grade_thresholds 테이블 + 인덱스 + CHECK 제약 (SPEC-AX-SCORE-001) |
 
 <!--
 Example rows:

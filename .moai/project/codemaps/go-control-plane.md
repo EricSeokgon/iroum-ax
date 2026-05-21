@@ -1,4 +1,4 @@
-# Go Control Plane 코드맵 (SPEC-AX-CTRL-001)
+# Go Control Plane 코드맵 (SPEC-AX-CTRL-001 · SPEC-AX-EVID-001 · SPEC-AX-EVAL-ITEM-001)
 
 ## 개요
 
@@ -191,7 +191,116 @@ type Event struct {
 
 ---
 
-### 6. 설정 및 타입 (`internal/config/`, `internal/types/`, `internal/errors/`, `internal/log/`)
+### 6. 증빙 관리 (`internal/store/evidence.go`, `internal/storage/`, `internal/audit/recorder.go`, `cmd/server/evidence_handlers.go`)
+
+> SPEC-AX-EVID-001 v0.1.0 — 경영평가 증빙 자료 수집/관리
+
+**evidence.go** (`internal/store/evidence.go` — EvidenceTx 구현)
+- `PgEvidenceTx` struct: pgx TX 래퍼, `EvidenceTx` 인터페이스 구현
+- `BeginEvidenceTx(ctx) (EvidenceTx, error)`: `PgWorkflowStore.pool`에서 새 pgx TX 시작 (신규 pool 생성 금지 — 단일 pool 재사용)
+- `InsertEvidence(ctx, evalItemID, fileName, contentType, fileSize, fileHash, storageStrategy, storageLocation, metadata, fileContent BYTEA, prevVersionID)` → `(uuid.UUID, error)`
+- `GetEvidenceByID(ctx, id)` → `(*Evidence, error)` — not found 시 `ErrEvidenceNotFound` 래핑
+- `GetLatestVersionByEvalItem(ctx, evalItemID)` → `(*Evidence, error)` — `SELECT ... FOR UPDATE` 직렬화
+- `ListEvidenceByEvalItem(ctx, evalItemID)` → `([]*Evidence, error)`
+- `MarkSuperseded(ctx, id)` → `error` — 직전 버전 `status=SUPERSEDED` 전이 (본문/파일 메타 불변)
+- `InsertAuditLog`, `Commit`, `Rollback`
+- @MX:ANCHOR: `BeginEvidenceTx` (핸들러 + 통합 테스트 + 감사 검증 3곳 이상 호출)
+
+**storage.go** (`internal/storage/storage.go` — 저장 전략 추상화)
+- `EvidenceBlobStore` interface: `Put(ctx, key, io.Reader) (string, error)`, `Get(ctx, location) (io.ReadCloser, error)`
+- `dbBlobStore` struct: database_blob 전략 구현체 — blob bytes는 이 인터페이스를 통과하지 않음; `Put`은 논리 위치 `db://evidences/<key>` 만 반환 (실제 바이너리는 `InsertEvidence(file_content)` 경유)
+- `NewDBBlobStore() EvidenceBlobStore`: 외부 의존 0 (자격증명/네트워크 endpoint 없음 — REQ-EVID-UBI-001)
+- @MX:NOTE: 저장 전략 database_blob 확정 — 추상화 유지로 filesystem/minio 전환 대비 (REQ-EVID-004)
+
+**recorder.go** (`internal/audit/recorder.go` — 증빙 감사 메서드 추가)
+- `RecordEvidenceCreated(ctx, tx, evidenceID, evalItemID, fileHashSHA256, version, userID)`: `EVIDENCE_CREATED` 액션 audit_logs INSERT — details `{evaluation_item_id, version, file_hash_sha256}`
+- `RecordEvidenceVersioned(ctx, tx, evidenceID, evalItemID, fileHashSHA256, version, previousVersionID, userID)`: `EVIDENCE_VERSIONED` 액션 — details에 `previous_version_id` 포함
+- 두 메서드 모두 `r.nowUTC()` (Clock 주입) 사용, `r.resolveUserID()` 로 cli-anonymous 기본값 적용
+- @MX:ANCHOR: `RecordEvidenceCreated`, `RecordEvidenceVersioned` (핸들러+통합테스트+감사 검증 3곳 이상)
+
+**clock.go** (`internal/audit/clock.go` — 시각 주입 추상화)
+- `Clock` interface: `NowUTC() time.Time`
+- `systemClock` struct: `time.Now().UTC()` 반환 (기존 동작과 byte-identical)
+- `defaultClock Clock = systemClock{}`: Recorder가 명시적 Clock 미주입 시 사용
+- `WithClock(c Clock) RecorderOption`: 테스트에서 고정 시각 주입 (R-EVID-007)
+
+**evidence_handlers.go** (`cmd/server/evidence_handlers.go` — 단일 증빙 핸들러)
+- `EvidenceHandler` struct: `store.EvidenceStore`, `evidenceRecorder`, `storage.EvidenceBlobStore`, `*zap.Logger`, `maxFileBytes int64`, `dupSignal bool`
+- `NewEvidenceHandler(st, rec, blob, logger, maxFileBytes, dupSignal)`: 핸들러 생성
+- **단일 라우트**: `Routes() http.Handler` → `mux.HandleFunc("POST /api/v1/evidences", h.handleCreateEvidence)` (GAP-01 — `/evidences/{id}/versions` 별도 라우트 없음)
+- **단일 핸들러** `handleCreateEvidence`: Content-Type 검증(SEC-01) → Content-Length 사전 거부(SEC-02.1) → multipart SHA-256 단일 패스 스트리밍(F1, SEC-02.2/3) → pre-TX 입력 검증(SEC-05) → `BeginEvidenceTx` → defer Rollback(SEC-07) → `GetLatestVersionByEvalItem` 버전 결정 → `InsertEvidence(file_content)` → `MarkSuperseded` → `RecordEvidence{Created|Versioned}` → Commit → 201 `{evidence_id, version}`
+- `parseAndHashMultipart(r, maxBytes)`: `io.MultiWriter(&buf, sha256.New())` + `io.LimitReader` 단일 패스
+- `resolveVersion(ctx, tx, evalItemID, fileHash)`: SELECT FOR UPDATE 직렬화, dupSignal 처리
+- @MX:ANCHOR: `EvidenceHandler` (핸들러 테스트 + 서버 마운트 + 통합 테스트 3곳 이상)
+- @MX:WARN: `BeginEvidenceTx` 이후 Commit 전 panic/early-return 시 orphan 증빙 행 누출 — defer Rollback이 즉시 등록되어야 함 (SEC-07)
+
+**config.go 추가 항목** (`internal/config/config.go`)
+- `EvidenceStorageStrategy string` — env `EVIDENCE_STORAGE_STRATEGY`, 기본 `database_blob`
+- `EvidenceMaxFileBytes int64` — env `EVIDENCE_MAX_FILE_BYTES`, 기본 52428800 (50 MiB)
+- `EvidenceDuplicateSignalEnabled bool` — env `EVIDENCE_DUPLICATE_SIGNAL_ENABLED`, 기본 `false`
+- `Validate()` / `LoadConfig()`: storage strategy 열거 검증 fail-fast
+
+**errors.go 추가 항목** (`internal/errors/errors.go`)
+- `ErrEvidenceNotFound`: `GetEvidenceByID` pgx.ErrNoRows 래핑 (GAP-03)
+- `ErrEvidenceImmutable`: successor 존재 시 본문 컬럼 변경 시도 차단 (GAP-04, REQ-EVID-UBI-004)
+
+---
+
+---
+
+### 7. 평가항목 taxonomy (`internal/store/store.go`, `internal/store/eval_item.go`, `internal/store/pg_store.go`, `internal/audit/audit.go`, `internal/audit/recorder.go`, `internal/errors/errors.go`)
+
+> SPEC-AX-EVAL-ITEM-001 v0.1.3 — 경영평가 평가항목 taxonomy Walking Skeleton
+> **HTTP 엔드포인트 없음** — store/audit 계층 전용 (cmd/server 무변경)
+
+**store.go** (`internal/store/store.go` — EvalItemStore/EvalItemTx 인터페이스)
+- `EvalItemStore` 인터페이스: `BeginEvalItemTx(ctx) (EvalItemTx, error)` — pgx 풀 재사용 진입점
+- `EvalItemTx` 인터페이스 (@MX:ANCHOR — fan_in ≥ 3):
+  - `InsertEvalItem(ctx, id, displayName, hierarchyCode, level string, parentID *string, metadata map[string]any) error`
+  - `GetEvalItemByID(ctx, id string) (*EvalItem, error)`
+  - `GetEvalItemsByParentID(ctx, parentID string) ([]*EvalItem, error)`
+  - `UpdateEvalItem(ctx, id string, upd EvalItemUpdate) error`
+  - `InsertAuditLog(ctx, e audit.Event) error`
+  - `Commit() error`, `Rollback() error`
+- `EvalItemUpdate` struct: `Status *string`, `Metadata *map[string]any` (포인터 필드 — nil = 변경 없음, 부분 업데이트)
+
+**eval_item.go** (`internal/store/eval_item.go` — PgEvalItemTx 구현)
+- `PgEvalItemTx` struct: pgx.Tx 래퍼, @MX:WARN (InsertEvalItem/InsertAuditLog 사이 panic/early-return 시 orphan 항목 행 누출)
+- M1 리팩터 — 3-헬퍼 분리:
+  - `validateEvalItemInput`: id 공백·64자 초과·displayName 공백·hierarchyCode 공백 검증 → `ErrEvalItemInvalidInput`
+  - `validateStatusTransition(current, next string) error`: 허용 전이 매트릭스 검사 → `ErrEvalItemInvalidStatus`
+  - `checkHierarchyMutationGuard(ctx, tx, id) error`: 자식 항목 보유 시 계층 불변 보호 → `ErrEvalItemHierarchyImmutable`
+  - `buildEvalItemUpdateSet(upd EvalItemUpdate) ([]string, []any)`: 포인터 nil 검사로 SET 절 동적 구성
+- InsertEvalItem: parent 선존재 확인 → INSERT (orphan 방지, AC-EVALITEM-001-S1-1)
+
+**pg_store.go** (`internal/store/pg_store.go` — BeginEvalItemTx)
+- `BeginEvalItemTx(ctx) (EvalItemTx, error)` (@MX:ANCHOR): `s.pool.BeginTx` 재사용 — `PgWorkflowStore.pool` 단일 pgx 풀 (신규 pool 0건, EVID-001 `BeginEvidenceTx` 동일 패턴)
+- 반환: `&PgEvalItemTx{tx: tx, logger: s.logger}`
+
+**audit.go** (`internal/audit/audit.go` — AUD-1 불변식 상수)
+- `ActionEvalItemCreated Action = "EVAL_ITEM_CREATED"` — 평가항목 생성 감사 액션
+- `ActionEvalItemUpdated Action = "EVAL_ITEM_UPDATED"` — 평가항목 수정 감사 액션
+- `var EvalItemAuditNamespace = uuid.MustParse("a7f3c2e1-9b4d-5e6f-8a0b-1c2d3e4f5a6b")` (@MX:ANCHOR — AUD-1 불변식; 컴파일 타임 literal, runtime 생성 금지)
+
+**recorder.go** (`internal/audit/recorder.go` — 평가항목 감사 메서드)
+- `RecordEvalItemCreated(ctx, tx, hierarchyCode, displayName, level, parentID, userID string) error` (@MX:ANCHOR)
+  - AUD-1: `resource_id = uuid.NewSHA1(EvalItemAuditNamespace, []byte(hierarchyCode))` — 결정적 UUIDv5 surrogate
+  - 실 식별자(`eval_item_id`, `hierarchy_code`, `parent_id`, `level`)는 `DetailsJSON` 저장
+  - **resource_id = 원시 계층 코드 아님** (VARCHAR(64)는 UUID 컬럼 불가 — AUD-1 해결책)
+- `RecordEvalItemUpdated(ctx, tx, hierarchyCode, changedFields []string, userID string) error` (@MX:ANCHOR)
+  - 동일 AUD-1 UUIDv5 변환; `DetailsJSON`에 변경 필드 목록 포함
+
+**errors.go** (`internal/errors/errors.go` — 에러 센티널 5종 추가)
+- `ErrEvalItemNotFound = errors.New("evaluation item not found")`
+- `ErrEvalItemInvalidInput = errors.New("evaluation item invalid input")`
+- `ErrEvalItemParentNotFound = errors.New("evaluation item parent not found")`
+- `ErrEvalItemHierarchyImmutable = errors.New("evaluation item hierarchy is immutable: children exist")`
+- `ErrEvalItemInvalidStatus = errors.New("evaluation item invalid status value")`
+- (기존 workflow/evidence sentinel 비변경 — 추가적 합산)
+
+---
+
+### 8. 설정 및 타입 (`internal/config/`, `internal/types/`, `internal/errors/`, `internal/log/`)
 
 **config.go** (환경변수 파서)
 ```
@@ -222,7 +331,7 @@ LogLevel (기본: info)
 
 ---
 
-### 7. Protobuf 정의 (`internal/proto/`)
+### 9. Protobuf 정의 (`internal/proto/`)
 
 **workflow.pb.go** (수동 작성 proto 메시지)
 - WorkflowStatus enum
