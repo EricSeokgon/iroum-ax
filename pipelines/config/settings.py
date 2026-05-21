@@ -182,6 +182,22 @@ class Settings(BaseSettings):
         validation_alias="GO_CONTROL_PLANE_URL",
     )
 
+    # --- SPEC-AX-INGEST-001: VLM OCR + RAG + 채점 트리거 ---
+    # @MX:NOTE: [AUTO] REQ-INGEST-001 VLM OCR 타임아웃 (CPU 10페이지 PDF 기준 p99 < 200s 목표)
+    # @MX:SPEC: SPEC-AX-INGEST-001 REQ-INGEST-001
+    vlm_timeout_seconds: int = Field(
+        default=120,
+        description="VLM OCR 타임아웃 (초) — 초과 시 TimeoutError로 status='failed' 전이",
+        validation_alias="VLM_TIMEOUT_SECONDS",
+    )
+    # @MX:NOTE: [AUTO] REQ-INGEST-003 Python→Go 채점 API Bearer 토큰 (OPEN #2 결정)
+    # @MX:SPEC: SPEC-AX-INGEST-001 REQ-INGEST-003
+    score_api_token: str = Field(
+        default="",
+        description="Go 채점 API Bearer 토큰 — 빈 문자열이면 Authorization 헤더 생략",
+        validation_alias="SCORE_API_TOKEN",
+    )
+
     # --- 로깅 ---
     log_level: str = Field(default="INFO", description="로그 레벨")
 

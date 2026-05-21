@@ -99,7 +99,14 @@ class TestCallbackInvocationFromRun:
     """
 
     def test_run_invokes_callback_on_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """run(doc, wf=...) 정상 완료 시 post_callback이 status='completed'로 호출되어야 함"""
+        """run(doc, wf=...) 정상 완료 시 post_callback이 status='completed'로 호출되어야 함.
+
+        SPEC-AX-INGEST-001에서 _execute가 stub → 실 파이프라인으로 교체됨.
+        호출 contract 유지(REQ-INTEG-002, AC-INGEST-001-7)를 검증하기 위해
+        VLM/Embed/VectorStore/ScoreTrigger를 모킹한다.
+        """
+        from unittest.mock import MagicMock
+
         from pipelines.workers import ingestion_worker
 
         captured: dict = {}
@@ -114,8 +121,26 @@ class TestCallbackInvocationFromRun:
         # ingestion_worker에서 임포트한 post_callback을 fake로 교체
         monkeypatch.setattr(ingestion_worker, "post_callback", fake_post_callback)
 
-        # run의 내부 처리는 stub — 본 SPEC 범위 (§6.3 OUT of scope)
-        # 호출 자체는 envelope payload 정합으로 가능해야 함
+        # 실 파이프라인 의존성도 모킹 — SPEC-AX-INGEST-001 단위 격리
+        mock_vlm = MagicMock()
+        mock_vlm.ocr.return_value = "정상 OCR 텍스트"
+        mock_vlm.last_inference_meta = {"inference_backend": "transformers_cpu"}
+        monkeypatch.setattr(ingestion_worker, "VLMProcessor", MagicMock(return_value=mock_vlm))
+
+        mock_emb = MagicMock()
+        mock_emb.encode.return_value = [0.1] * 768
+        monkeypatch.setattr(
+            ingestion_worker, "EmbeddingService", MagicMock(return_value=mock_emb)
+        )
+
+        mock_vs = MagicMock()
+        mock_vs.upsert.return_value = None
+        monkeypatch.setattr(ingestion_worker, "VectorStore", MagicMock(return_value=mock_vs))
+
+        mock_st = MagicMock()
+        mock_st.fire.return_value = True
+        monkeypatch.setattr(ingestion_worker, "ScoreTrigger", MagicMock(return_value=mock_st))
+
         ingestion_worker._execute(document_id="doc-1", workflow_id="wf-1")
 
         assert captured["workflow_id"] == "wf-1"
