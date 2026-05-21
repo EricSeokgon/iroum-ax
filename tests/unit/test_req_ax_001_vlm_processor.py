@@ -180,3 +180,101 @@ class TestVLMProcessorGPUBranch:
                 processor.ocr(sample_image_path, use_gpu=True)
         meta = processor.last_inference_meta
         assert "gpu_device" in meta
+
+
+# =============================================================================
+# 내부 메서드 직접 호출 — 커버리지 보완 (lines 53, 73-77, 89-98, 108-118)
+# =============================================================================
+
+
+class TestVLMProcessorDirectMethods:
+    """VLMProcessor 내부 메서드 직접 호출 — _load_model / _run_inference / ocr_with_lock."""
+
+    def test_load_model_cpu_returns_mock(self, sample_image_path: str) -> None:
+        """_load_model(False)는 device='cpu' 인 mock 모델을 반환한다."""
+        from pipelines.ingestion.vlm_processor import VLMProcessor  # type: ignore[import]
+
+        _ = sample_image_path
+        processor = VLMProcessor(use_gpu=False)
+        model = processor._load_model(False)
+        assert model is not None
+        assert str(model.device) == "cpu"
+
+    def test_load_model_gpu_returns_mock_with_cuda_device(
+        self, sample_image_path: str
+    ) -> None:
+        """_load_model(True)는 cuda 장치를 가진 mock 모델을 반환한다."""
+        from pipelines.ingestion.vlm_processor import VLMProcessor  # type: ignore[import]
+
+        _ = sample_image_path
+        processor = VLMProcessor(use_gpu=True)
+        model = processor._load_model(True)
+        assert "cuda" in str(model.device)
+
+    def test_run_inference_cpu_sets_transformers_backend(
+        self, sample_image_path: str
+    ) -> None:
+        """_run_inference()는 CPU model로 transformers_cpu 백엔드를 설정한다."""
+        from pipelines.ingestion.vlm_processor import VLMProcessor  # type: ignore[import]
+
+        processor = VLMProcessor(use_gpu=False)
+        cpu_model = MagicMock()
+        cpu_model.device = "cpu"
+        result = processor._run_inference(sample_image_path, cpu_model)
+        assert result["inference_backend"] == "transformers_cpu"
+        assert "gpu_device" not in result
+
+    def test_run_inference_gpu_sets_vllm_backend(
+        self, sample_image_path: str
+    ) -> None:
+        """_run_inference()는 GPU model로 vllm_gpu 백엔드와 gpu_device를 설정한다."""
+        from pipelines.ingestion.vlm_processor import VLMProcessor  # type: ignore[import]
+
+        processor = VLMProcessor(use_gpu=True)
+        gpu_model = MagicMock()
+        gpu_model.device = "cuda:0"
+        result = processor._run_inference(sample_image_path, gpu_model)
+        assert result["inference_backend"] == "vllm_gpu"
+        assert result["gpu_device"] == 0
+
+    def test_ocr_with_lock_happy_path(self, sample_image_path: str) -> None:
+        """ocr_with_lock은 lock을 획득하여 ocr 결과를 반환하고 lock을 해제한다."""
+        from pipelines.ingestion.vlm_processor import VLMProcessor  # type: ignore[import]
+
+        processor = VLMProcessor(use_gpu=False)
+        with patch.object(processor, "_load_model", return_value=MagicMock(device="cpu")):
+            with patch.object(
+                processor,
+                "_run_inference",
+                return_value={"text": "OCR결과", "inference_backend": "transformers_cpu"},
+            ):
+                result = processor.ocr_with_lock("doc-001", sample_image_path)
+        assert result == "OCR결과"
+        # 락 해제 검증
+        assert "doc-001" not in processor._active_ocr_doc_ids
+
+    def test_ocr_with_lock_concurrent_raises(self, sample_image_path: str) -> None:
+        """동일 document_id에 OCR이 이미 진행 중이면 OCRConcurrencyError."""
+        from pipelines.ingestion.vlm_processor import VLMProcessor  # type: ignore[import]
+        from pkg.errors.custom_errors import OCRConcurrencyError
+
+        processor = VLMProcessor(use_gpu=False)
+        processor._active_ocr_doc_ids.add("doc-duplicate")
+        with pytest.raises(OCRConcurrencyError):
+            processor.ocr_with_lock("doc-duplicate", sample_image_path)
+
+    def test_ocr_non_dict_result_returns_str(self, sample_image_path: str) -> None:
+        """_run_inference가 dict가 아닌 값을 반환하면 ocr()은 str로 변환한다."""
+        from pipelines.ingestion.vlm_processor import VLMProcessor  # type: ignore[import]
+
+        processor = VLMProcessor(use_gpu=False)
+        with patch.object(processor, "_load_model", return_value=MagicMock(device="cpu")):
+            with patch.object(
+                processor,
+                "_run_inference",
+                return_value="plain text result",
+            ):
+                result = processor.ocr(sample_image_path)
+        assert result == "plain text result"
+        # dict가 아니면 last_inference_meta는 빈 dict
+        assert processor.last_inference_meta == {}

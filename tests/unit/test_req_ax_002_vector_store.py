@@ -52,6 +52,24 @@ class TestVectorStoreUpsert:
         store = VectorStore(conn=mock_pgvector_conn)
         store.upsert([])  # 예외 없이 통과해야 함
 
+    def test_upsert_criterion_without_embedding_uses_zero_vector(
+        self, mock_pgvector_conn: MagicMock
+    ) -> None:
+        """embedding=None인 Criterion은 zero-vector로 대체되어 저장된다.
+
+        VectorStore.upsert() line 40 branch (else: zero-vector).
+        """
+        from pipelines.mapping.vector_store import VectorStore  # type: ignore[import]
+
+        c = Criterion(
+            id="no-emb-001",
+            criterion_name="임베딩없는기준",
+            embedding=None,
+        )
+        store = VectorStore(conn=mock_pgvector_conn)
+        store.upsert([c])  # 예외 없이 처리되어야 함
+        assert mock_pgvector_conn.execute.call_count >= 1
+
 
 class TestVectorStoreQuery:
     """VectorStore.query() 계약 검증 (단위 테스트 — mock DB)"""
@@ -272,3 +290,116 @@ def pg_connection() -> object:
     실제 컨테이너 연결은 GREEN phase에서 conftest.py에 추가.
     """
     pytest.skip("통합 테스트용 pgvector 컨테이너 픽스처 — GREEN phase에서 구현")
+
+
+# ============================================================
+# FakeVectorStore 단위 테스트 — 인메모리 폴백 구현 검증
+# ============================================================
+
+
+class TestFakeVectorStore:
+    """FakeVectorStore 인메모리 구현 검증."""
+
+    def test_upsert_and_query_roundtrip(self) -> None:
+        """upsert 후 query로 동일 차원 벡터 검색이 성공해야 한다."""
+        from pipelines.mapping.vector_store import FakeVectorStore  # type: ignore[import]
+
+        store = FakeVectorStore()
+        criteria = [
+            Criterion(
+                id=f"c-{i:03d}",
+                criterion_name=f"기준 {i}",
+                embedding=[0.1 + i * 0.01] + [0.0] * 767,
+            )
+            for i in range(3)
+        ]
+        store.upsert(criteria)
+        result = store.query([0.1] * 768, top_k=3)
+        assert isinstance(result, list)
+        assert all(isinstance(m, CriterionMatch) for m in result)
+        assert len(result) <= 3
+
+    def test_fake_store_empty_raises_not_bootstrapped(self) -> None:
+        """비어 있는 FakeVectorStore에서 query는 IndexNotBootstrappedError."""
+        from pipelines.mapping.vector_store import FakeVectorStore  # type: ignore[import]
+        from pkg.errors.custom_errors import IndexNotBootstrappedError
+
+        store = FakeVectorStore()
+        with pytest.raises(IndexNotBootstrappedError):
+            store.query([0.1] * 768, top_k=3)
+
+    def test_fake_store_wrong_dim_raises_value_error(self) -> None:
+        """768차원이 아닌 query 벡터는 ValueError를 발생시켜야 한다."""
+        from pipelines.mapping.vector_store import FakeVectorStore  # type: ignore[import]
+
+        store = FakeVectorStore()
+        store.upsert(
+            [
+                Criterion(
+                    id="c-001",
+                    criterion_name="기준",
+                    embedding=[0.1] * 768,
+                )
+            ]
+        )
+        with pytest.raises(ValueError, match="768"):
+            store.query([0.1] * 512, top_k=3)
+
+    def test_fake_store_rebuilding_raises_error(self) -> None:
+        """_rebuilding=True 상태에서 query는 IndexRebuildingError."""
+        from pipelines.mapping.vector_store import FakeVectorStore  # type: ignore[import]
+        from pkg.errors.custom_errors import IndexRebuildingError
+
+        store = FakeVectorStore()
+        store.upsert(
+            [
+                Criterion(
+                    id="c-001",
+                    criterion_name="기준",
+                    embedding=[0.1] * 768,
+                )
+            ]
+        )
+        store._rebuilding = True
+        with pytest.raises(IndexRebuildingError):
+            store.query([0.1] * 768, top_k=3)
+
+    def test_fake_store_upsert_deduplicates(self) -> None:
+        """동일 id 재삽입 시 기존 항목을 덮어써야 한다."""
+        from pipelines.mapping.vector_store import FakeVectorStore  # type: ignore[import]
+
+        store = FakeVectorStore()
+        c = Criterion(id="dup-001", criterion_name="중복기준", embedding=[0.5] * 768)
+        store.upsert([c, c])
+        assert store.count_indexed_criteria() == 1
+
+    def test_fake_store_is_rebuilding_default_false(self) -> None:
+        """초기 FakeVectorStore의 is_rebuilding은 False."""
+        from pipelines.mapping.vector_store import FakeVectorStore  # type: ignore[import]
+
+        store = FakeVectorStore()
+        assert store.is_rebuilding() is False
+
+    def test_fake_store_count_indexed_criteria(self) -> None:
+        """count_indexed_criteria()는 upsert된 항목 수를 반환한다."""
+        from pipelines.mapping.vector_store import FakeVectorStore  # type: ignore[import]
+
+        store = FakeVectorStore()
+        assert store.count_indexed_criteria() == 0
+        store.upsert(
+            [Criterion(id="c-001", criterion_name="기준", embedding=[0.1] * 768)]
+        )
+        assert store.count_indexed_criteria() == 1
+
+    def test_fake_store_upsert_none_embedding_uses_zeros(self) -> None:
+        """embedding=None인 Criterion도 zero-vector로 저장된다."""
+        from pipelines.mapping.vector_store import FakeVectorStore  # type: ignore[import]
+
+        store = FakeVectorStore()
+        c = Criterion(
+            id="c-002",
+            criterion_name="임베딩없는기준",
+            embedding=None,
+        )
+        store.upsert([c])
+        assert store.count_indexed_criteria() == 1
