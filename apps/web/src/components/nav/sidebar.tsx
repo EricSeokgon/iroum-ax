@@ -15,7 +15,7 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { href: "/dashboard/evidence", label: "증빙 관리", allow: ["viewer", "analyst", "admin"] },
   { href: "/dashboard/evaluation-items", label: "평가 항목", allow: ["viewer", "analyst", "admin"] },
   { href: "/dashboard/scores", label: "점수 입력", allow: ["analyst", "admin"] },
-  { href: "/dashboard/report", label: "리포트", allow: ["viewer", "analyst", "admin"] },
+  { href: "/dashboard/reports", label: "리포트", allow: ["viewer", "analyst", "admin"] },
   { href: "/dashboard/reviews", label: "리뷰 워크플로", allow: ["viewer", "analyst", "admin"] },
   { href: "/dashboard/audit-logs", label: "감사 로그", allow: ["admin"] },
   { href: "/dashboard/rubric", label: "루브릭 설정", allow: ["admin"] },
