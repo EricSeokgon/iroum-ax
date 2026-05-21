@@ -7,6 +7,17 @@
 
 ## [Unreleased] - 2026-05-21
 
+### Added — SPEC-AX-PIPE-001 v0.1.0 (Python AI 파이프라인 REST API 계층)
+
+- **FastAPI 7개 엔드포인트** (`pipelines/main.py`): `POST /api/documents/upload` (문서 업로드·VLM 처리) · `POST /api/criteria/index` (평가기준 인덱싱) · `GET /api/criteria/search` (유사도 검색) · `POST /api/simulations/predict` (등급 시뮬레이션) · `POST /api/reports/generate` (보고서 초안 생성) · `POST /api/recommendations/generate` (Gap 추천 생성) · `PATCH /api/recommendations/{id}/feedback` (피드백 반영). BackgroundTasks D7 패턴으로 Celery 의존 없는 비동기 처리.
+- **Pydantic 모델 17종** (`pipelines/config/models.py`): Sprint 2–6 입출력 스키마. `DocumentUpload` · `CriterionIndex` · `CriterionSearch` · `SimulationPredict` · `ReportGenerate` · `RecommendationGenerate` 계열 요청/응답 모델 + 기반 설정 모델.
+- **신규 테스트 31건**: `tests/unit/test_config_models.py` 22건(Pydantic 모델 직렬화·유효성 검사) · `tests/unit/test_main_endpoints.py` 9건(FastAPI TestClient 통합). 기존 `FakeVectorStore` · `VLMProcessor` · `ScenarioSimulator` 커버리지 파일 3개 확장.
+- **커버리지**: 91.49% (목표 85% 초과)
+- **TRUST 5 게이트**: evaluator-active PASS 0.933 (Tested 0.95 / Security 0.90 / Craft 0.92 / Consistency 0.94)
+- **consumer-only 0-diff [HARD]**: `apps/control-plane/` · `apps/web/` · `internal/` · `go.mod` · `.moai/db/` 무변경. Python 파이프라인 계층 신규 구현 전용.
+
+---
+
 ### Added — SPEC-AX-E2E-001 v0.4.0 (Playwright E2E 테스트 슈트)
 
 - **21개 Playwright E2E 테스트 케이스** (`apps/web/e2e/`, 5개 spec 파일): `auth.spec.ts`(인증 흐름 5건) · `rbac-viewer.spec.ts`(Viewer 권한 제한 5건) · `flow-analyst.spec.ts`(Analyst 골든패스 4건) · `flow-admin.spec.ts`(Admin 골든패스 4건) · `logout.spec.ts`(로그아웃 3건). `npx playwright test --list` 21 tests discovered PASS.
