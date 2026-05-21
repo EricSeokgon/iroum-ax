@@ -91,7 +91,7 @@ class Settings(BaseSettings):
 
     # --- LLM 모델 경로 ---
     # GPU 미사용 환경: transformers 직접 로딩 (vLLM 불필요)
-    # GPU 환경(pytest -m gpu): VLM_ENDPOINT 등 vLLM 서버 URL 지정
+    # GPU 환경(pytest -m gpu): VLLM_ENDPOINT 등 vLLM 서버 URL 지정
     model_dir: str = Field(
         default="/models",
         description="로컬 모델 저장 디렉토리 (Qwen2-VL, Qwen 2.5, ko-sroberta)",
@@ -123,7 +123,8 @@ class Settings(BaseSettings):
     # vLLM 엔드포인트 (GPU 환경 opt-in)
     vlm_endpoint: str = Field(
         default="",
-        description="vLLM VLM 서버 URL (비어있으면 transformers 직접 로딩)",
+        description="vLLM 서버 URL (비어있으면 transformers 직접 로딩)",
+        validation_alias="VLLM_ENDPOINT",
     )
     llm_endpoint: str = Field(
         default="",
@@ -169,6 +170,16 @@ class Settings(BaseSettings):
         default=30,
         description="JWT 시간 클레임 검증 허용 오차 (초) — OAuth 2.0 BCP RFC 9700 권장치",
         validation_alias="CLOCK_SKEW_SECONDS",
+    )
+
+    # --- SPEC-AX-INTEG-001: Go Control Plane 콜백 base URL ---
+    # @MX:NOTE: [AUTO] REQ-INTEG-006 — Celery worker가 처리 결과를 Go로 보고하는 콜백 대상.
+    # 기본값은 docker-compose development 환경 (localhost:8080); REQ-UBI-001 정합으로 외부
+    # URL 허용은 별도 정책 검토 필요 (현재 SPEC 범위 외).
+    go_control_plane_url: str = Field(
+        default="",
+        description="Go Control Plane REST base URL (콜백 대상) — 빈 문자열이면 worker 부팅 거부",
+        validation_alias="GO_CONTROL_PLANE_URL",
     )
 
     # --- 로깅 ---
