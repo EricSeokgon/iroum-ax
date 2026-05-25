@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import httpx
 import pytest
-
 from pipelines.ingestion.score_trigger import ScoreTrigger
 
 
@@ -86,7 +85,7 @@ class TestScoreTrigger:
 
         assert result is False
         # ERROR 로그 기록 확인
-        assert any("ERROR" == r.levelname for r in caplog.records)
+        assert any(r.levelname == "ERROR" for r in caplog.records)
 
     def test_fire_504_returns_false_no_raise(
         self, caplog: pytest.LogCaptureFixture
@@ -125,7 +124,7 @@ class TestScoreTrigger:
             )
 
         assert result is False
-        assert any("ERROR" == r.levelname for r in caplog.records)
+        assert any(r.levelname == "ERROR" for r in caplog.records)
 
     def test_fire_timeout_returns_false_no_raise(
         self, caplog: pytest.LogCaptureFixture

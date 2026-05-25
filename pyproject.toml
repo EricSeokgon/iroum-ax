@@ -102,6 +102,12 @@ ignore = [
     "SIM117",   # 테스트 setup의 다중 with 문 — 가독성을 위해 유지
     "B017",     # pytest.raises(Exception) — 의도적 광범위 catch (구현 전 RED)
     "SIM105",   # try/except pass 패턴 — 테스트 setup에서 의도적 사용
+    "N818",     # 테스트 mock 클래스 네이밍 — Error suffix 면제
+]
+"pipelines/scripts/run_demo.py" = [
+    "E501",     # 한국어 데모 텍스트 장문 — 줄 길이 면제
+    "ANN401",   # 데모 출력 함수 Any 타입 — 허용
+    "SIM108",   # 데모 스크립트 if/else 가독성 — 삼항 연산자 면제
 ]
 
 # --- Mypy 설정 ---

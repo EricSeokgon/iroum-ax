@@ -8,7 +8,6 @@ character-based sliding window: chunk_size=1536 chars, overlap=128 chars (D2 결
 from __future__ import annotations
 
 import pytest
-
 from pipelines.ingestion.text_chunker import TextChunker
 
 

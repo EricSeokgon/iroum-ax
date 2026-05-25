@@ -71,11 +71,11 @@ def _print_banner(chapter: int, name: str) -> None:
     print(_bold(_cyan(line)))
 
 
-def _print_result(label: str, value: Any) -> None:
+def _print_result(label: str, value: Any) -> None:  # noqa: ANN401
     print(f"  {_bold(label)}: {value}")
 
 
-def _print_json(data: Any, indent: int = 4) -> None:
+def _print_json(data: Any, indent: int = 4) -> None:  # noqa: ANN401
     print(json.dumps(data, ensure_ascii=False, indent=indent))
 
 
@@ -218,7 +218,7 @@ def run_chapter1_ingestion(kepco_report: dict, verbose: bool = False) -> dict:
         return {}
 
     print(f"  입력: {kepco_report.get('report_id', 'N/A')} ({kepco_report.get('organization', '')})")
-    print(f"  파일 형식: JSON (시연용 — HWP 실제 파싱 대신 픽스처 직접 로드)")
+    print("  파일 형식: JSON (시연용 — HWP 실제 파싱 대신 픽스처 직접 로드)")
     print()
 
     # 모든 지표 텍스트를 합쳐서 ParsedDocument.text 구성
@@ -346,7 +346,7 @@ def run_chapter2_mapping(
         print(f"       relevance={r['relevance']:.2f}, max_points={r['max_points']}점")
         if verbose:
             print(f"       A등급 기준: {r['scoring_guide_a']}")
-    print(f"  검색 시간: 47ms (mock)")
+    print("  검색 시간: 47ms (mock)")
 
     mapping_result = {
         "query": "안전교육 이수율 평가기준",
@@ -627,7 +627,7 @@ def run_chapter5_recommendation(
 
     print(f"  현재 등급: {current_grade} (P(A)={p_a:.3f})")
     print("  목표 등급: A")
-    print(f"  분석 기준: A 등급 벤치마크 (other-A-grade-2026)")
+    print("  분석 기준: A 등급 벤치마크 (other-A-grade-2026)")
     print()
 
     recommendations = _MOCK_RECOMMENDATIONS
@@ -666,7 +666,7 @@ def run_chapter5_recommendation(
             print(f"       소요: {rec['effort_estimate']}")
         print()
 
-    print(f"  --- 종합 시뮬레이션 ---")
+    print("  --- 종합 시뮬레이션 ---")
     _print_result("현재 P(A)", f"{p_a:.3f}")
     _print_result("추천 실행 후 P(A)", f"{result['projected_p_a']:.3f} (예상)")
     _print_result("누적 점수 개선", f"+{result['cumulative_score_delta']:.3f}")
@@ -720,8 +720,8 @@ def print_audit_summary(verbose: bool = False) -> None:
     for entry in _AUDIT_LOG_SEQUENCE:
         print(f"  [{entry['id']}] {_bold(entry['action']):.<35} {entry['resource_type']}/{entry['resource_id']}")
     print()
-    print(f"  모든 이벤트: user_id='cli-anonymous' (AUTH_ENABLED=false, sandbox 모드)")
-    print(f"  REQ-UBI-003 준수: UPLOAD + PREDICTION + DRAFT_GENERATE + RECOMMENDATION + ...")
+    print("  모든 이벤트: user_id='cli-anonymous' (AUTH_ENABLED=false, sandbox 모드)")
+    print("  REQ-UBI-003 준수: UPLOAD + PREDICTION + DRAFT_GENERATE + RECOMMENDATION + ...")
 
 
 def print_final_summary(
@@ -750,10 +750,10 @@ def print_final_summary(
     print(f"    예상 등급: {_green(recommendation_result.get('projected_grade', 'B'))}")
     print()
     print(f"  {_bold('[ 핵심 가치 ]')}")
-    print(f"    - 보고서 작성 초안 생성: ~4초 (vs 수작업 3-4시간/지표)")
-    print(f"    - 평가기준 자동 매칭: 47ms (vs 수작업 수시간)")
-    print(f"    - 등급 예측 근거 제공: 즉시 (vs 주관적 추정)")
-    print(f"    - 모든 데이터 처리: 내부망 전용 (망분리 정합, REQ-UBI-001)")
+    print("    - 보고서 작성 초안 생성: ~4초 (vs 수작업 3-4시간/지표)")
+    print("    - 평가기준 자동 매칭: 47ms (vs 수작업 수시간)")
+    print("    - 등급 예측 근거 제공: 즉시 (vs 주관적 추정)")
+    print("    - 모든 데이터 처리: 내부망 전용 (망분리 정합, REQ-UBI-001)")
     print()
     print(_green("  데모 완료. 상세 시나리오: .moai/demo/kepco-poc-walkthrough.md"))
 
@@ -826,7 +826,7 @@ def main() -> int:
     print(_bold(_cyan("  iroum-ax PoC 데모 — KEPCO 안전보건 평가 자동화")))
     print(_bold(_cyan(f"  모드: {mode.upper()}")))
     print(_bold(_cyan("=" * 60)))
-    print(f"  [주의] 모든 데이터는 시연용 합성 가상 데이터입니다.")
+    print("  [주의] 모든 데이터는 시연용 합성 가상 데이터입니다.")
     print(f"  픽스처 위치: {fixture_dir}")
     print()
 
@@ -835,13 +835,13 @@ def main() -> int:
     # 5 Chapter 순차 실행
     parsed_doc = run_chapter1_ingestion(kepco_report, verbose=verbose)
 
-    mapping_result = run_chapter2_mapping(criteria_data, parsed_doc, verbose=verbose)
+    run_chapter2_mapping(criteria_data, parsed_doc, verbose=verbose)
 
     grade_dist = run_chapter3_scoring(
         kepco_report, a_grade_report, b_grade_report, mode=mode, verbose=verbose
     )
 
-    draft_result = run_chapter4_generation(
+    run_chapter4_generation(
         criteria_data, kepco_report, mode=mode, verbose=verbose
     )
 

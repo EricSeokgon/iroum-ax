@@ -29,7 +29,7 @@ import sys
 import time
 from types import ModuleType
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -158,6 +158,7 @@ def auth_enabled_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OIDC_AUDIENCE", _TEST_AUDIENCE)
     # settings 캐시 무효화 (pydantic-settings 캐시 때문에 필요)
     import importlib
+
     import pipelines.config.settings as cfg_mod
     importlib.reload(cfg_mod)
 
@@ -169,6 +170,7 @@ def auth_disabled_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OIDC_ISSUER_URL", _TEST_ISSUER)
     monkeypatch.setenv("OIDC_AUDIENCE", _TEST_AUDIENCE)
     import importlib
+
     import pipelines.config.settings as cfg_mod
     importlib.reload(cfg_mod)
 
@@ -193,8 +195,8 @@ class TestTokenValidatorVerify:
         RED: stub이 NotImplementedError를 raise → FAIL.
         GREEN: 실제 PyJWT decode + RS256 검증 후 ValidatedToken 반환.
         """
-        from pipelines.auth.validator import TokenValidator
         from pipelines.auth.models import ValidatedToken
+        from pipelines.auth.validator import TokenValidator
 
         token = _make_jwt_payload(alg="RS256")
         validator = TokenValidator(oidc_issuer=_TEST_ISSUER, audience=_TEST_AUDIENCE)
@@ -214,8 +216,8 @@ class TestTokenValidatorVerify:
         RED: stub이 NotImplementedError → 잘못된 예외 타입으로 FAIL.
         GREEN: PyJWT exp 검증 후 TokenExpiredError 발생.
         """
-        from pipelines.auth.validator import TokenValidator
         from pipelines.auth.errors import TokenExpiredError
+        from pipelines.auth.validator import TokenValidator
 
         # exp_offset=-100 → 100초 전에 만료, clock skew 30초 초과
         token = _make_jwt_payload(exp_offset=-100)
@@ -232,8 +234,8 @@ class TestTokenValidatorVerify:
         RED: stub이 NotImplementedError → 잘못된 예외 타입으로 FAIL.
         GREEN: PyJWT aud 검증 실패 시 TokenInvalidAudienceError 발생.
         """
-        from pipelines.auth.validator import TokenValidator
         from pipelines.auth.errors import TokenInvalidAudienceError
+        from pipelines.auth.validator import TokenValidator
 
         token = _make_jwt_payload(aud="some-other-service")
         validator = TokenValidator(oidc_issuer=_TEST_ISSUER, audience=_TEST_AUDIENCE)
@@ -249,8 +251,8 @@ class TestTokenValidatorVerify:
         RED: stub이 NotImplementedError → 잘못된 예외 타입으로 FAIL.
         GREEN: PyJWT iss 검증 실패 시 TokenInvalidIssuerError 발생.
         """
-        from pipelines.auth.validator import TokenValidator
         from pipelines.auth.errors import TokenInvalidIssuerError
+        from pipelines.auth.validator import TokenValidator
 
         # 다른 realm의 토큰 — cross-realm 공격 시뮬레이션
         token = _make_jwt_payload(iss=_OTHER_ISSUER)
@@ -267,8 +269,8 @@ class TestTokenValidatorVerify:
         RED: stub이 NotImplementedError → 잘못된 예외 타입으로 FAIL.
         GREEN: 허용 목록(RS256/EdDSA/ES256) 검사 후 AlgorithmNotAllowedError 발생.
         """
-        from pipelines.auth.validator import TokenValidator
         from pipelines.auth.errors import AlgorithmNotAllowedError
+        from pipelines.auth.validator import TokenValidator
 
         token = _make_jwt_payload(alg="HS256")
         validator = TokenValidator(oidc_issuer=_TEST_ISSUER, audience=_TEST_AUDIENCE)
@@ -287,8 +289,8 @@ class TestTokenValidatorVerify:
         RED: stub이 NotImplementedError → 잘못된 예외 타입으로 FAIL.
         GREEN: kty/alg cross-check 후 AlgorithmKeyMismatchError 발생.
         """
-        from pipelines.auth.validator import TokenValidator
         from pipelines.auth.errors import AlgorithmKeyMismatchError
+        from pipelines.auth.validator import TokenValidator
 
         # kty=RSA + alg=ES256 불일치 조합 (Algorithm Confusion Attack 변형)
         token = _make_jwt_payload(alg="ES256", kty="RSA")

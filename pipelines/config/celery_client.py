@@ -13,7 +13,6 @@ from __future__ import annotations
 import os
 
 from pipelines.config.settings import validate_llm_endpoint
-from pkg.errors.custom_errors import ExternalLLMBlockedError
 
 
 def validate_worker_environment(
