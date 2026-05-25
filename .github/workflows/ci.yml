@@ -39,10 +39,10 @@ jobs:
       github.event_name == 'pull_request'
     steps:
       - name: 코드 체크아웃
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Python ${{ env.PYTHON_VERSION }} 설정 (pip 캐시 포함)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
@@ -77,17 +77,17 @@ jobs:
       github.event_name == 'pull_request'
     steps:
       - name: 코드 체크아웃
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Go ${{ env.GO_VERSION }} 설정 (모듈 캐시 포함)
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
       # golangci-lint 공식 액션 — 자체 캐시 내장
       - name: golangci-lint 실행
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
           version: "v1.64"
           args: --timeout=5m ./apps/control-plane/...
@@ -109,10 +109,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 코드 체크아웃
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Python ${{ env.PYTHON_VERSION }} 설정
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           # uv 사용 시 pip 캐시는 uv가 관리하므로 pip 캐시 비활성화
@@ -146,7 +146,7 @@ jobs:
 
       - name: Python 커버리지 아티팩트 업로드
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: python-coverage-xml
           path: coverage-python.xml
@@ -168,10 +168,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 코드 체크아웃
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Go ${{ env.GO_VERSION }} 설정 (모듈 캐시 포함)
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -193,7 +193,7 @@ jobs:
 
       - name: Go 커버리지 아티팩트 업로드
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: go-coverage-out
           path: go-coverage.out
@@ -256,10 +256,10 @@ jobs:
 
     steps:
       - name: 코드 체크아웃
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Go ${{ env.GO_VERSION }} 설정 (모듈 캐시 포함)
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -313,10 +313,10 @@ jobs:
     needs: [lint-go]
     steps:
       - name: 코드 체크아웃
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Go ${{ env.GO_VERSION }} 설정 (모듈 캐시 포함)
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -348,7 +348,7 @@ jobs:
           echo "- 상태: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
 
       - name: 빌드 바이너리 아티팩트 업로드
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: control-plane-binary
           path: bin/control-plane
