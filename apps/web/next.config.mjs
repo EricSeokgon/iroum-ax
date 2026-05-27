@@ -1,5 +1,3 @@
-import type { NextConfig } from "next";
-
 // @MX:NOTE: Next.js 설정 — Go control-plane(:8080)을 위한 rewrite proxy 정의.
 // SPEC-AX-WEB-001 §7.2: BFF Route Handler(`/api/auth/**`)는 직접 처리,
 // 그 외 `/api/v1/**`는 Go control-plane으로 투과 프록시.
@@ -7,7 +5,7 @@ import type { NextConfig } from "next";
 const BACKEND_BASE_URL =
   process.env["BACKEND_BASE_URL"] ?? "http://localhost:8080";
 
-const nextConfig: NextConfig = {
+const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
 
