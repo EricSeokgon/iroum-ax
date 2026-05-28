@@ -23,7 +23,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 # =============================================================
 # Stage 2: Python 런타임 (Pipelines)
 # =============================================================
-FROM python:3.11-slim AS python-base
+FROM python:3.14-slim AS python-base
 
 # 보안: 비루트 사용자 생성
 RUN groupadd --gid 1000 axuser && \
