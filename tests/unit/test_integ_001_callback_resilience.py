@@ -10,11 +10,9 @@ REQ-INTEG-002 / REQ-INTEG-003 / AC-INTEG-001-5 검증:
 from __future__ import annotations
 
 import logging
-from unittest.mock import patch
 
 import httpx
 import pytest
-
 
 # ── helper imports — GREEN 단계에서 모듈을 생성한다 ──────────────────────────────────
 # RED 단계에서는 import 자체가 실패할 수 있다. GREEN에서 모듈 생성 후 테스트 통과.

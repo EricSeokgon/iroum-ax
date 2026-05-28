@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # 본 모듈 전체에 integration marker 부여 — pytest -m integration로만 실행
 pytestmark = pytest.mark.integration
 

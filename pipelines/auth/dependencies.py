@@ -9,6 +9,8 @@ AuthEnabled=false 시 cli-anonymous 폴백 (REQ-AUTH-UBI-001 backward compat).
 """
 from __future__ import annotations
 
+from datetime import UTC
+
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -20,7 +22,7 @@ _bearer_scheme = HTTPBearer(auto_error=False)
 
 
 async def verify_token(
-    credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),  # noqa: B008
 ) -> ValidatedToken:
     """FastAPI Depends — Bearer 토큰을 검증하고 ValidatedToken을 반환한다.
 
@@ -49,14 +51,14 @@ async def verify_token(
 
     if not current_settings.auth_enabled:
         # AuthEnabled=false: cli-anonymous 폴백 (R-AUTH-007 backward compat)
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         return ValidatedToken(
             subject=current_settings.default_user_id,
             issuer="",
             audience=[],
             scopes=[],
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
             claims={},
         )
 

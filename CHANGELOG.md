@@ -7,6 +7,26 @@
 
 ## [Unreleased] - 2026-05-21
 
+### Added — SPEC-AX-INGEST-001 v0.1.0 (Ingestion Worker 실제 구현 — VLM OCR + RAG 임베딩 + Go 채점 트리거)
+
+- **`_execute()` 실제 파이프라인** (`pipelines/workers/ingestion_worker.py`): SPEC-AX-INTEG-001이 남긴 `stub=True` 스텁을 7-Step VLM OCR + RAG + 채점 트리거 파이프라인으로 교체. REQ-INGEST-001~005c 전체 구현.
+- **TextChunker** (`pipelines/ingestion/text_chunker.py`, 54 LOC): 문자 기반 슬라이딩 윈도우 청커. `chunk_size=1536, overlap=128` — 외부 토크나이저 의존 없음(REQ-UBI-001 준수).
+- **ScoreTrigger** (`pipelines/ingestion/score_trigger.py`, 115 LOC): Go 채점 API fire-and-forget 클라이언트. `POST /api/v1/scores` HTTP 201 확인. Bearer 토큰 헤더(`SCORE_API_TOKEN` 환경변수), 빈값 시 헤더 생략(PoC 샌드박스 모드). 예외 완전 흡수 — Celery ACK 보장(REQ-INGEST-003/003b).
+- **DocumentMetadataClient** (`pipelines/ingestion/document_metadata.py`, 60 LOC): Celery 엔벨로프 kwargs에서 `file_path`, `file_type`, `user_id` 추출. fallback: `default_user_id`(REQ-UBI-003, REQ-INGEST-004b).
+- **settings.py 확장**: `vlm_timeout_seconds: int = Field(default=120)` + `score_api_token: str = Field(default="")` 추가(OPEN #2/#5 해소).
+- **IngestionEmptyError** (`pkg/errors/custom_errors.py`): VLM OCR 결과 빈 텍스트 시 사용자 친화적 오류.
+- **모듈 레벨 부팅 검증**: `validate_llm_endpoint(settings.vlm_endpoint)` — Celery worker 시작 시 외부 LLM 차단 강제(REQ-INGEST-005).
+- **result_json 강화**: `{document_id, chunks, tokens, score_triggered, ocr_backend, pages_processed, spec}` — stub `{"stub": True}` 교체(REQ-INGEST-004).
+- **EC-10 처리**: 청크별 임베딩 실패 → 건너뜀 + WARNING + `failed_chunks: int` 집계(REQ-INGEST-004b 준수).
+- **신규 환경변수**: `VLM_TIMEOUT_SECONDS`(VLM OCR 타임아웃, 기본값 120초) · `SCORE_API_TOKEN`(Go 채점 API Bearer 토큰, 빈값 시 PoC 샌드박스 모드).
+- **보안 제약 준수**: REQ-UBI-001(외부 LLM 차단) · REQ-UBI-002(한국어 오류 메시지) · REQ-UBI-003(audit user_id='cli-anonymous').
+- **신규 단위 테스트 31건**: `test_ingest_text_chunker.py`(9건) · `test_ingest_score_trigger.py`(9건) · `test_ingest_document_metadata.py`(6건) · `test_ingest_execute.py`(7건) — 골든패스/VLM 타임아웃/503/EC-10/한국어 메시지 커버.
+- **커버리지**: 88%(신규·수정 모듈 기준, 목표 85% 초과).
+- **consumer-only 0-diff [HARD]**: `apps/control-plane/` · `go.mod` · `go.sum` 무변경. Python 전용 변경.
+- **INTEG-001 회귀 방지**: `test_integ_001_celery_envelope.py` 목킹 업데이트(stub→pipeline 계약 변경 반영), 26건 GREEN 유지.
+
+---
+
 ### Added — SPEC-AX-INTEG-001 v0.1.0 (Python↔Go 통합 — Celery 워크플로우 트리거 및 REST 콜백)
 
 - **Go callback handler** (`apps/control-plane/cmd/server/workflow_callback_handler.go`, 275 LOC): `POST /api/v1/workflows/{id}/callback` — RUNNING→COMPLETED|FAILED 상태 전이(단일 TX: GetWorkflow FOR UPDATE + UpdateWorkflowState + UpdateWorkflowResult + InsertAuditLog). 204 성공 / 400 잘못된 본문 또는 상태 / 404 워크플로우 없음 / 409 비-RUNNING 상태(terminal state 거부). audit user_id='cli-anonymous'(REQ-UBI-003). 한국어 에러 메시지(REQ-UBI-002).

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import json
+from datetime import UTC
 from typing import Any
 
 from pipelines.auth.errors import (
@@ -184,10 +185,7 @@ class TokenValidator:
 
         # 7단계: aud 검증
         aud_claim = payload.get("aud", [])
-        if isinstance(aud_claim, str):
-            aud_list = [aud_claim]
-        else:
-            aud_list = list(aud_claim)
+        aud_list = [aud_claim] if isinstance(aud_claim, str) else list(aud_claim)
         if self._audience not in aud_list:
             raise TokenInvalidAudienceError(
                 f"aud 불일치: got={aud_list!r}, expected={self._audience!r}"
@@ -198,12 +196,12 @@ class TokenValidator:
         scope_str = payload.get("scope", "")
         scopes = scope_str.split() if isinstance(scope_str, str) and scope_str else []
 
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         expires_at = (
-            datetime.fromtimestamp(exp, tz=timezone.utc)
+            datetime.fromtimestamp(exp, tz=UTC)
             if exp is not None
-            else datetime.now(tz=timezone.utc)
+            else datetime.now(tz=UTC)
         )
 
         return ValidatedToken(

@@ -16,6 +16,6 @@ __all__ = [
     "verify_token",
 ]
 
+from pipelines.auth.dependencies import verify_token
 from pipelines.auth.models import ValidatedToken
 from pipelines.auth.validator import TokenValidator
-from pipelines.auth.dependencies import verify_token

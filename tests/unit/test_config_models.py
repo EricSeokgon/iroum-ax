@@ -7,8 +7,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from pydantic import ValidationError
-
 from pipelines.config.models import (
     CriterionIndexRequest,
     CriterionSearchItem,
@@ -28,6 +26,7 @@ from pipelines.config.models import (
     WorkflowResponse,
     WorkflowStatus,
 )
+from pydantic import ValidationError
 
 
 class TestEnums:

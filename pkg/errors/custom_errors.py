@@ -30,3 +30,7 @@ class IndexRebuildingError(IroumAxBaseError):
 
 class IndexNotBootstrappedError(IroumAxBaseError):
     """pgvector 인덱스가 아직 초기화(부트스트랩)되지 않은 상태에서 검색 요청 시 발생 (REQ-AX-002)"""
+
+
+class IngestionEmptyError(IroumAxBaseError):
+    """VLM OCR 결과가 빈 문자열일 때 발생 (SPEC-AX-INGEST-001 REQ-INGEST-001)"""
