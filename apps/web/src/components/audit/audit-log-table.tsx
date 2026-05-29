@@ -17,6 +17,8 @@ import type {
 interface AuditLogTableProps {
   /** RSC가 사전 로드한 초기 데이터 (필터 없음, offset=0) */
   initial: AuditLogListResponse;
+  /** RSC 사전 로드 실패 시 true — 마운트 직후 브라우저 fetch로 자동 재시도 */
+  fetchFailed?: boolean;
 }
 
 const PAGE_SIZE = 20;
@@ -37,6 +39,7 @@ type FetchStatus =
  */
 export function AuditLogTable({
   initial,
+  fetchFailed = false,
 }: AuditLogTableProps): React.ReactElement {
   // 입력 중인(아직 미적용) 필터 — "조회" 클릭 시에만 적용된다.
   const [draftFilters, setDraftFilters] = React.useState<AuditLogFilters>({});
@@ -88,6 +91,14 @@ export function AuditLogTable({
     },
     [],
   );
+
+  // RSC 사전 로드 실패 시 마운트 직후 브라우저 fetch로 자동 재시도.
+  // page.route 모킹 환경(E2E)에서는 이 경로가 인터셉트되어 mock 데이터를 반환한다.
+  React.useEffect(() => {
+    if (fetchFailed) {
+      void loadLogs({}, 0);
+    }
+  }, [fetchFailed, loadLogs]);
 
   function handleQuery(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();

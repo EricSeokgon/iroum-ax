@@ -16,6 +16,8 @@ import type {
 interface RubricThresholdTableProps {
   /** RSC가 사전 로드한 초기 목록 */
   initial: RubricThresholdListResponse;
+  /** RSC 사전 로드 실패 시 true — 마운트 직후 브라우저 fetch로 자동 재시도 */
+  fetchFailed?: boolean;
 }
 
 type LoadStatus =
@@ -34,6 +36,7 @@ type LoadStatus =
  */
 export function RubricThresholdTable({
   initial,
+  fetchFailed = false,
 }: RubricThresholdTableProps): React.ReactElement {
   const [thresholds, setThresholds] = React.useState<RubricThreshold[]>(
     initial.thresholds,
@@ -66,6 +69,13 @@ export function RubricThresholdTable({
       });
     }
   }, []);
+
+  // RSC 사전 로드 실패 시 마운트 직후 브라우저 fetch로 자동 재시도.
+  React.useEffect(() => {
+    if (fetchFailed) {
+      void refresh();
+    }
+  }, [fetchFailed, refresh]);
 
   function handleCreated(): void {
     setShowCreate(false);

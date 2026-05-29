@@ -45,6 +45,12 @@ export default async function RubricPage(): Promise<React.ReactElement> {
 
   const initial = await loadInitialThresholds();
 
+  // 사전 로드 실패 시 빈 데이터를 넘기고 fetchFailed=true로 표시.
+  // RubricThresholdTable이 마운트 후 브라우저 fetch로 자동 재시도한다.
+  const initialData =
+    initial.kind === "ok" ? initial.data : { thresholds: [] };
+  const fetchFailed = initial.kind === "error";
+
   return (
     <section className="space-y-6">
       <header className="space-y-1">
@@ -54,17 +60,7 @@ export default async function RubricPage(): Promise<React.ReactElement> {
         </p>
       </header>
 
-      {initial.kind === "error" ? (
-        <p
-          className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          role="alert"
-          aria-live="polite"
-        >
-          {initial.message}
-        </p>
-      ) : (
-        <RubricThresholdTable initial={initial.data} />
-      )}
+      <RubricThresholdTable initial={initialData} fetchFailed={fetchFailed} />
     </section>
   );
 }

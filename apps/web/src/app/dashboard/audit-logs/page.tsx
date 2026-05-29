@@ -46,6 +46,14 @@ export default async function AuditLogsPage(): Promise<React.ReactElement> {
 
   const initial = await loadInitialLogs();
 
+  // 사전 로드 실패 시 빈 데이터를 넘기고 fetchFailed=true로 표시.
+  // AuditLogTable이 마운트 후 브라우저 fetch로 자동 재시도한다.
+  const initialData =
+    initial.kind === "ok"
+      ? initial.data
+      : { logs: [], total: 0, limit: 20, offset: 0 };
+  const fetchFailed = initial.kind === "error";
+
   return (
     <section className="space-y-6">
       <header className="space-y-1">
@@ -55,17 +63,7 @@ export default async function AuditLogsPage(): Promise<React.ReactElement> {
         </p>
       </header>
 
-      {initial.kind === "error" ? (
-        <p
-          className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          role="alert"
-          aria-live="polite"
-        >
-          {initial.message}
-        </p>
-      ) : (
-        <AuditLogTable initial={initial.data} />
-      )}
+      <AuditLogTable initial={initialData} fetchFailed={fetchFailed} />
     </section>
   );
 }
@@ -82,6 +80,10 @@ async function loadInitialLogs(): Promise<InitialLoadResult> {
     const data = await apiFetch<AuditLogListResponse>(
       `/api/v1/audit-logs?limit=${INITIAL_PAGE_SIZE}&offset=0`,
     );
+    // 백엔드 응답 구조 검증 — logs 배열 부재 시 구조 불일치로 처리해 client-side 재시도 유도.
+    if (!Array.isArray((data as { logs?: unknown }).logs)) {
+      return { kind: "error", message: "감사 로그 응답 형식이 올바르지 않습니다." };
+    }
     return { kind: "ok", data };
   } catch (err) {
     if (err instanceof ApiError) {
