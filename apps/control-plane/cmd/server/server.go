@@ -61,7 +61,9 @@ type Server struct {
 	// 감사 로그 검색 핸들러 (SPEC-AX-AUDIT-QUERY-001, read-only, admin-only narrowing)
 	auditQueryH *AuditQueryHandler
 	// Python→Go 워크플로우 콜백 핸들러 (SPEC-AX-INTEG-001, RUNNING→terminal 전이 전담)
-	callbackH  *WorkflowCallbackHandler
+	callbackH *WorkflowCallbackHandler
+	// 평가항목 taxonomy 핸들러 (SPEC-AX-EVAL-ITEM-001, adjacency list, admin-only write)
+	evalItemH *EvalItemHandler
 	dispatcher *scheduler.CeleryDispatcher
 	grpcServer  *grpc.Server
 	httpServer  *http.Server
@@ -226,6 +228,8 @@ func New(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Server, 
 	s.auditQueryH = NewAuditQueryHandler(pgStore, logger)
 	// SPEC-AX-INTEG-001: Python→Go 워크플로우 콜백 핸들러 (RUNNING→terminal 단일 TX 전이)
 	s.callbackH = NewWorkflowCallbackHandler(pgStore, rec, logger)
+	// SPEC-AX-EVAL-ITEM-001: 평가항목 taxonomy 핸들러 (pgStore가 EvalItemStore 구현)
+	s.evalItemH = NewEvalItemHandler(pgStore, rec, logger)
 
 	return s, nil
 }
@@ -297,6 +301,9 @@ func (s *Server) Run(ctx context.Context) error {
 	// (POST /api/v1/workflows/{id}/callback. ServeMux Go1.22+ path-param.
 	// /api/v1/workflows/{id} 등 다른 워크플로우 REST는 restHandler.Mux()가 처리.)
 	innerMux.Handle("/api/v1/workflows/{id}/callback", s.callbackH.Routes())
+	// SPEC-AX-EVAL-ITEM-001: 평가항목 taxonomy 서브트리 (adjacency list, admin-only write, viewer read)
+	innerMux.Handle("/api/v1/eval-items", s.evalItemH.Routes())
+	innerMux.Handle("/api/v1/eval-items/", s.evalItemH.Routes())
 	innerMux.Handle("/", s.restHandler.Mux())
 
 	outerMux.Handle("/", auth.BuildRESTChain(
