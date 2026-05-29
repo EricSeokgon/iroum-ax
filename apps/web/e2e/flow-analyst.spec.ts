@@ -65,7 +65,8 @@ test.describe("Group C — analyst 흐름", () => {
   });
 
   // AC-FLOW-ANALYST-002 — 리뷰 제출 → POST /api/v1/reviews 발생
-  // SUT: SubmitReviewForm 의 "+ 리뷰 제출" 버튼
+  // SUT: SubmitReviewForm 의 "+ 리뷰 제출" 버튼 (RoleGate allow analyst/admin → 항상 렌더됨)
+  // mockBffApis 가 POST /api/v1/reviews → 201 { id, status:"SUBMITTED" } 모킹.
   test("AC-FLOW-ANALYST-002 — 리뷰 제출 후 POST /api/v1/reviews 네트워크 호출 발생", async ({
     analystPage,
   }) => {
@@ -81,55 +82,22 @@ test.describe("Group C — analyst 흐름", () => {
 
     await analystPage.goto("/dashboard/reviews");
 
-    // SubmitReviewForm 의 "+ 리뷰 제출" 버튼 (apps/web/src/components/review/submit-review-form.tsx:97)
+    // SubmitReviewForm: analyst 역할 → RoleGate 통과 → 항상 마운트됨
     const submitBtn = analystPage.locator(SEL.button(LABELS.reviewSubmit));
-    const exists = (await submitBtn.count()) > 0;
-    if (!exists) {
-      test.fixme(
-        true,
-        "SUT SubmitReviewForm 의 '+ 리뷰 제출' 버튼이 모달/조건부 진입일 가능성 — SPEC-AX-WEB-002 후속 필요",
-      );
-      return;
-    }
-
-    if (!(await submitBtn.first().isEnabled())) {
-      test.fixme(
-        true,
-        "SUT '+ 리뷰 제출' 버튼이 비활성 — 추가 입력 필요. SPEC-AX-WEB-002 후속 필요",
-      );
-      return;
-    }
-
+    await expect(submitBtn.first()).toBeVisible();
     await submitBtn.first().click();
+
+    // 폼 열림 → 제목 입력 후 제출
+    const titleInput = analystPage.locator("#review-title");
+    await expect(titleInput).toBeVisible();
+    await titleInput.fill("E2E 테스트 리뷰");
+
+    const innerSubmit = analystPage.locator(SEL.submitButton());
+    await expect(innerSubmit.first()).toBeEnabled();
+    await innerSubmit.first().click();
+
     await analystPage.waitForTimeout(500);
-
-    // 폼 내부에 추가 입력 필요할 수 있음 — 다시 한 번 시도
-    if (!reviewPostCalled) {
-      const innerSubmit = analystPage.locator(SEL.submitButton());
-      if (
-        (await innerSubmit.count()) > 0 &&
-        (await innerSubmit.first().isEnabled())
-      ) {
-        // 텍스트 입력이 필요할 수 있음
-        const textareas = analystPage.locator("textarea");
-        if ((await textareas.count()) > 0) {
-          await textareas.first().fill("리뷰 본문 테스트");
-        }
-        await innerSubmit.first().click();
-        await analystPage.waitForTimeout(500);
-      }
-    }
-
-    // TS narrowing 우회: 비동기 이벤트 핸들러에서 설정된 값을 식별하지 못함
-    const reviewPostResult = reviewPostCalled as boolean;
-    if (!reviewPostResult) {
-      test.fixme(
-        true,
-        "SubmitReviewForm 의 본문 입력 흐름이 모달 + 추가 필드 의존 — SPEC-AX-WEB-002 후속 필요",
-      );
-      return;
-    }
-    expect(reviewPostResult).toBe(true);
+    expect(reviewPostCalled).toBe(true);
   });
 
   // AC-FLOW-ANALYST-DENY-001 — analyst 의 audit-logs 접근 시 in-page 차단
