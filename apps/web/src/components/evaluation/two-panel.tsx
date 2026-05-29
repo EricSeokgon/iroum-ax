@@ -17,6 +17,8 @@ interface TwoPanelProps {
   currentRole: Role;
   /** 초기 선택 ID — 없으면 첫 루트 항목 자동 선택 */
   initialSelectedId?: string;
+  /** RSC fetch 실패 시 true — 마운트 후 브라우저 fetch로 자동 재시도 */
+  fetchFailed?: boolean;
 }
 
 /**
@@ -28,19 +30,56 @@ interface TwoPanelProps {
  * 페이지는 RSC로 인증/초기 fetch를 담당하고, 본 컴포넌트가 선택 상태만 보유.
  */
 export function TwoPanel({
-  items,
+  items: initialItems,
   currentRole,
   initialSelectedId,
+  fetchFailed,
 }: TwoPanelProps): React.ReactElement {
+  const [items, setItems] = React.useState<EvaluationItem[]>(initialItems);
+
   const [selectedId, setSelectedId] = React.useState<string | null>(() => {
     if (initialSelectedId) return initialSelectedId;
-    // items의 첫 루트(또는 첫 요소)를 기본 선택해 우측 패널 즉시 활성화
-    if (items.length === 0) return null;
-    const firstRoot = items.find(
+    // initialItems의 첫 루트(또는 첫 요소)를 기본 선택해 우측 패널 즉시 활성화
+    if (initialItems.length === 0) return null;
+    const firstRoot = initialItems.find(
       (it) => it.parent_id === null || it.parent_id === undefined,
     );
-    return (firstRoot ?? items[0]!).id;
+    return (firstRoot ?? initialItems[0]!).id;
   });
+
+  // RSC fetch 실패 시 마운트 후 브라우저 fetch로 재시도
+  React.useEffect(() => {
+    if (!fetchFailed) return;
+    let cancelled = false;
+    const doFetch = async (): Promise<void> => {
+      try {
+        const response = await fetch("/api/v1/evaluation-items", {
+          method: "GET",
+          cache: "no-store",
+        });
+        if (!response.ok || cancelled) return;
+        const data = (await response.json()) as { items?: EvaluationItem[] };
+        if (!cancelled) {
+          const fetched = data.items ?? [];
+          setItems(fetched);
+          setSelectedId((prev) => {
+            if (prev) return prev;
+            const firstRoot = fetched.find(
+              (it) => it.parent_id === null || it.parent_id === undefined,
+            );
+            return (firstRoot ?? fetched[0])?.id ?? null;
+          });
+        }
+      } catch {
+        // fetch 실패 — 빈 트리 유지
+      }
+    };
+    void doFetch();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchFailed]);
 
   // 트리에서 선택된 항목의 fallback 정보를 전달 — 상세 fetch 도중 빈 화면 방지
   const fallbackItem = React.useMemo(() => {

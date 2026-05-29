@@ -43,20 +43,11 @@ export default async function ReviewsPage(): Promise<React.ReactElement> {
         <SubmitReviewForm />
       </RoleGate>
 
-      {initial.kind === "error" ? (
-        <p
-          className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          role="alert"
-          aria-live="polite"
-        >
-          {initial.message}
-        </p>
-      ) : (
-        <KanbanBoard
-          initial={initial.data}
-          currentRole={session.role}
-        />
-      )}
+      <KanbanBoard
+        initial={initial.kind === "ok" ? initial.data : { reviews: [], total: 0 }}
+        fetchFailed={initial.kind === "error"}
+        currentRole={session.role}
+      />
     </section>
   );
 }

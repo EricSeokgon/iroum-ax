@@ -31,20 +31,11 @@ export default async function EvaluationItemsPage(): Promise<React.ReactElement>
         </p>
       </header>
 
-      {initial.kind === "error" ? (
-        <p
-          className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          role="alert"
-          aria-live="polite"
-        >
-          {initial.message}
-        </p>
-      ) : (
-        <TwoPanel
-          items={initial.data.items ?? []}
-          currentRole={session.role}
-        />
-      )}
+      <TwoPanel
+        items={initial.kind === "ok" ? (initial.data.items ?? []) : []}
+        fetchFailed={initial.kind === "error"}
+        currentRole={session.role}
+      />
     </section>
   );
 }

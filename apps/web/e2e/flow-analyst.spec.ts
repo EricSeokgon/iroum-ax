@@ -45,35 +45,19 @@ test.describe("Group C — analyst 흐름", () => {
       }
     });
 
-    await analystPage.goto("/dashboard/scores");
+    await analystPage.goto("/dashboard/evaluation-items");
+    // TwoPanel fetchFailed → 브라우저 fetch → "경영목표 달성도" 항목 자동 선택 대기
+    await expect(analystPage.getByText("경영목표 달성도").first()).toBeVisible();
 
-    // SUT ScoreForm 의 구체 입력 필드는 evaluation_item_id select + score number + comment textarea
-    // 안정적 셀렉터 부재 — 가능한 입력만 채우고 submit 시도. 실패 시 test.fixme.
-    const submitBtn = analystPage.locator(SEL.submitButton()).first();
-    const submitExists = (await submitBtn.count()) > 0;
-    if (!submitExists) {
-      test.fixme(
-        true,
-        "SUT 점수 폼 진입 경로(평가 항목 선택 또는 별도 라우트) 의존 — SPEC-AX-WEB-002 후속 셀렉터 안정화 필요",
-      );
-      return;
-    }
+    // ItemDetail ScoreForm → #score-value 입력
+    const scoreInput = analystPage.locator("#score-value");
+    await expect(scoreInput).toBeVisible();
+    await scoreInput.fill("85");
 
-    // 가능한 number input 에 점수 입력
-    const numberInputs = analystPage.locator(SEL.numberInput());
-    if ((await numberInputs.count()) > 0) {
-      await numberInputs.first().fill("85");
-    }
-
-    // 폼 제출 — disabled 면 즉시 fixme
-    if (!(await submitBtn.isEnabled())) {
-      test.fixme(
-        true,
-        "SUT 점수 폼이 evaluation_item_id 선택 등 추가 입력을 요구 — SPEC-AX-WEB-002 후속 필요",
-      );
-      return;
-    }
-    await submitBtn.click();
+    // "저장" 버튼 클릭
+    const saveBtn = analystPage.locator(SEL.button(LABELS.scoreSubmit)).first();
+    await expect(saveBtn).toBeEnabled();
+    await saveBtn.click();
 
     // 네트워크 호출 검증
     await analystPage.waitForTimeout(500);

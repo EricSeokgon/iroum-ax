@@ -26,6 +26,8 @@ interface KanbanBoardProps {
   initial: ReviewListResponse;
   /** 현재 사용자 역할 — admin만 카드 액션 버튼 표시 */
   currentRole: Role;
+  /** RSC fetch 실패 시 true — 마운트 후 브라우저 fetch로 자동 재시도 */
+  fetchFailed?: boolean;
 }
 
 /**
@@ -41,6 +43,7 @@ interface KanbanBoardProps {
 export function KanbanBoard({
   initial,
   currentRole,
+  fetchFailed,
 }: KanbanBoardProps): React.ReactElement {
   const [data, setData] = React.useState<ReviewListResponse>(initial);
   const [loading, setLoading] = React.useState<boolean>(false);
@@ -49,6 +52,14 @@ export function KanbanBoard({
     null,
   );
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+
+  // RSC fetch 실패 시 마운트 후 브라우저 fetch로 재시도
+  React.useEffect(() => {
+    if (fetchFailed) {
+      void fetchAll();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchFailed]);
 
   /**
    * SubmitReviewForm 성공/외부 trigger 시 list 새로고침.
