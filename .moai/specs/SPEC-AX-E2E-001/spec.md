@@ -1,9 +1,9 @@
 ---
 id: SPEC-AX-E2E-001
 version: 0.4.0
-status: implemented
+status: completed
 created: 2026-05-21
-updated: 2026-05-21
+updated: 2026-06-01
 author: ircp
 priority: high
 issue_number: 0
@@ -11,6 +11,7 @@ issue_number: 0
 
 # HISTORY
 
+- 2026-06-01: **v0.4.0 구현 완료(completed)** — 21개 E2E AC 전체 PASS(WEB-002/WEB-003 fixme 포함 최종 해소). `npx playwright test --list` 21 tests confirmed. consumer-only 0-diff [HARD] 준수.
 - 0.4.0 (2026-05-21): SUT 직접 검증으로 AC 3건 정정. AC-RBAC-DENY-001/002/AC-FLOW-ANALYST-DENY-001: 리다이렉트 대신 인-페이지 "권한이 없습니다. 관리자만 접근할 수 있습니다." 텍스트 표시(URL 유지)로 수정. 근거: `apps/web/src/app/(dashboard)/audit-logs/page.tsx:3` 코멘트 ("비-admin 접근 시 in-page error 표시 (redirect 대신, URL 유지)") + 동일 페이지 line 30-45 `if (session.role !== "admin") return <인-페이지 차단 JSX>;`. AC-AUTH-003: 만료 쿠키 흐름이 middleware는 통과(cookie 존재 여부만 검사)하고 `apps/web/src/app/(dashboard)/layout.tsx:17-20` `getServerSession()` null 검출 시 `redirect("/login")` 호출(no `?from=` param). 따라서 from 파라미터 없는 `/login` 단순 어설션으로 수정.
 - 0.3.0 (2026-05-21): SUT 직접 검증으로 phantom-path 2건 추가 정정. plan-auditor D1/D3이 BFF API 경로(`/api/v1/evidences`, `/api/v1/rubric/thresholds`)와 페이지 라우트를 혼동. 페이지 라우트: `/dashboard/evidences` → `/dashboard/evidence`(단수, SUT 일치), `/dashboard/rubric/thresholds` → `/dashboard/rubric`(SUT 일치). BFF API 경로는 이미 정확하므로 유지.
 - 0.2.0 (2026-05-21): plan-auditor CONDITIONAL PASS → PASS 전환(오버 교정 포함). D1(BLOCKER) `/dashboard/evidence` → `/dashboard/evidences` 변경(0.3.0에서 복원), D3 `/dashboard/rubric` → `/dashboard/rubric/thresholds` 변경(0.3.0에서 복원), D4 AC-VIS-ALL-001/002 신규 추가, D5 AC-AUTH-003 단일 결과로 확정, D6 AC-RBAC-DENY-001/002 단일 redirect 결과로 확정, D7 AC-FLOW-ANALYST-002 진입점 수정, D8 AC 수 24건으로 정정. OPEN #1~#6 전부 RESOLVED 처리.
