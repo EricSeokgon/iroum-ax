@@ -2,9 +2,9 @@
 id: SPEC-AX-INGEST-001
 title: Ingestion Worker 실제 구현 — VLM OCR + RAG 임베딩 + Go 채점 트리거
 version: "0.1.0"
-status: implemented
+status: completed
 created: "2026-05-21"
-updated: "2026-05-21"
+updated: "2026-06-01"
 author: ircp
 priority: high
 issue_number: 0
@@ -15,6 +15,7 @@ parent_specs: [SPEC-AX-INTEG-001, SPEC-AX-PIPE-001, SPEC-AX-SCORE-API-001]
 
 - 2026-05-21: 초안 작성 (v0.1.0). research.md(2026-05-21) 기반 EARS 5 REQ + 8 AC 정의. SPEC-AX-INTEG-001이 남긴 `_execute()` 스텁(ingestion_worker.py:52-82)을 실제 VLM OCR + RAG 임베딩 + 채점 트리거 파이프라인으로 교체. consumer-only [HARD] 0-diff (rbac/auth/schema/go.mod 무변경) 자연 성립 — Python-only 변경 범위.
 - 2026-05-21: v0.1.1 — plan-auditor iter1 FAIL 해소: EARS 혼합 분리(REQ-INGEST-003→003+003b, 004→004+004b, 005→005+005b+005c), OPEN #1/#3 RESOLVED, SLO 모순 수정(30s→200s/문서 CPU), summary 파라미터 스키마 정의, EC-10 청크 실패 처리 명세.
+- 2026-06-01: **v0.1.0 구현 완료(completed)** — TDD GREEN 확인. 8개 AC 전체 통과(31 단위 테스트). 신규 모듈: TextChunker, ScoreTrigger, DocumentMetadataClient. `_execute()` 7-Step 파이프라인 본체 교체. coverage 88%. consumer-only 0-diff [HARD] 준수.
 
 ---
 
