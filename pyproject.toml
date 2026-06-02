@@ -65,7 +65,7 @@ pytest-cov = "^4.1.0"
 testcontainers = { version = "^4.5.0", extras = ["postgres", "redis"] }
 
 # --- 린트 / 타입 체크 ---
-ruff = "^0.4.0"
+ruff = ">=0.4,<0.16"
 mypy = "^1.10.0"
 types-redis = "^4.6.0"
 
