@@ -39,10 +39,10 @@ jobs:
       github.event_name == 'pull_request'
     steps:
       - name: 코드 체크아웃
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Python ${{ env.PYTHON_VERSION }} 설정 (pip 캐시 포함)
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
@@ -77,10 +77,10 @@ jobs:
       github.event_name == 'pull_request'
     steps:
       - name: 코드 체크아웃
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Go ${{ env.GO_VERSION }} 설정 (모듈 캐시 포함)
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -109,10 +109,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 코드 체크아웃
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Python ${{ env.PYTHON_VERSION }} 설정
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           # uv 사용 시 pip 캐시는 uv가 관리하므로 pip 캐시 비활성화
@@ -168,10 +168,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 코드 체크아웃
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Go ${{ env.GO_VERSION }} 설정 (모듈 캐시 포함)
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -256,10 +256,10 @@ jobs:
 
     steps:
       - name: 코드 체크아웃
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Go ${{ env.GO_VERSION }} 설정 (모듈 캐시 포함)
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -313,10 +313,10 @@ jobs:
     needs: [lint-go]
     steps:
       - name: 코드 체크아웃
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Go ${{ env.GO_VERSION }} 설정 (모듈 캐시 포함)
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
